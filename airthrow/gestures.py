@@ -91,9 +91,13 @@ def is_open_hand(lm) -> bool:
 
 
 def is_two_finger(lm) -> bool:
-    """The 'peace' / V sign: index + middle up, ring + pinky down."""
+    """The 'peace' / V sign: index + middle up, and not a full open hand.
+
+    Tolerant on ring/pinky (detection is noisy there): accept as long as index
+    and middle are up and at least one of ring/pinky is down, so an open hand
+    (all four up) is still rejected."""
     index, middle, ring, pinky = finger_states(lm)
-    return index and middle and not ring and not pinky
+    return index and middle and (not ring or not pinky)
 
 
 # --------------------------------------------------------------------------
@@ -119,9 +123,11 @@ class BaseHandDetector:
             ),
             running_mode=vision.RunningMode.VIDEO,
             num_hands=1,
-            min_hand_detection_confidence=0.6,
-            min_hand_presence_confidence=0.5,
-            min_tracking_confidence=0.5,
+            # Lower thresholds so a hand already in a fist / V-sign is picked up
+            # directly, without first showing an open palm to acquire tracking.
+            min_hand_detection_confidence=0.35,
+            min_hand_presence_confidence=0.35,
+            min_tracking_confidence=0.35,
         )
         self._landmarker = vision.HandLandmarker.create_from_options(options)
 
@@ -226,25 +232,37 @@ class TwoFingerDetector(SwipeDetector):
     out accidental hand movement, while staying as quick as a plain swipe.
     """
 
+    POSE_GRACE_FRAMES = 4  # tolerate this many non-pose frames mid-swipe
+
     def __init__(self, on_swipe: Callable[[str], None],
                  min_distance: float = SWIPE_MIN_DISTANCE):
         super().__init__(on_swipe, min_distance)
         self.pose_ok = False
+        self._pose_miss = 0
 
     def _reset(self) -> None:
         super()._reset()
         self.pose_ok = False
+        self._pose_miss = 0
 
     def _update(self, lm, now: float) -> str | None:
-        self.pose_ok = is_two_finger(lm)
-        if not self.pose_ok:
-            # Pose broken: drop the motion so a swipe must be made with two
-            # fingers held the whole time.
-            self.history.clear()
-            self.cur_dx = 0.0
-            self.cur_dt = 0.0
-            return None
-        return super()._update(lm, now)
+        if is_two_finger(lm):
+            self._pose_miss = 0
+            self.pose_ok = True
+            return super()._update(lm, now)
+
+        # Not currently a clean V-sign. Tolerate brief flicker so detection
+        # noise doesn't keep resetting an in-progress swipe.
+        self._pose_miss += 1
+        if self._pose_miss <= self.POSE_GRACE_FRAMES and self.history:
+            self.pose_ok = True
+            return super()._update(lm, now)
+
+        self.pose_ok = False
+        self.history.clear()
+        self.cur_dx = 0.0
+        self.cur_dt = 0.0
+        return None
 
 
 # --------------------------------------------------------------------------

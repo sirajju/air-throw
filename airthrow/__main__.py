@@ -103,8 +103,8 @@ def cmd_set_name(args):
 
 
 def cmd_set_sensitivity(args):
-    if not 0.05 <= args.distance <= 0.9:
-        sys.exit("distance should be between 0.05 (very easy) and 0.9 (very hard)")
+    if not 0.02 <= args.distance <= 0.9:
+        sys.exit("distance should be between 0.02 (ultra easy) and 0.9 (very hard)")
     cfg = Config.load()
     cfg.swipe_min_distance = args.distance
     cfg.save()
