@@ -125,6 +125,7 @@ a swipe does nothing, check the `--debug` overlay: the progress bar must reach
 | `info` | Show this device's name, IP, port, settings and log path |
 | `set-sensitivity <d>` | Swipe travel needed to fire, 0.05 (easy) .. 0.9 (hard) |
 | `set-auto-open <on\|off>` | Auto-open received images in the default viewer |
+| `camtest` | Probe camera indices and report which deliver frames |
 | `selftest` | Load the hand model and process a frame (no camera needed) |
 | `logs [-n N]` | Print the tail of the log file |
 | `set-name <name>` | Set the name peers see |
@@ -166,6 +167,19 @@ View it any time with `airthrow logs` (e.g. `airthrow logs -n 100`). Logged
 events include every swipe (`SWIPE right (dx=+0.41 over 280ms)`), near-misses,
 sends, receives, and errors. When something misbehaves, that file is the first
 thing to check — and the easiest thing to send over for help.
+
+## Camera preview won't show / no window
+
+If the console prints `camera N open` but **no preview window appears** (and you
+have to Ctrl+C), the camera opened but isn't delivering frames. Run:
+
+```bash
+airthrow camtest         # shows which index/backend actually works
+airthrow run --camera 1  # then use a working index
+```
+
+AirThrow tries DirectShow → MSMF on Windows and V4L2 on Linux, and drops to
+receive-only mode if frames never arrive (instead of hanging).
 
 ## Notes & limits (stage 1)
 

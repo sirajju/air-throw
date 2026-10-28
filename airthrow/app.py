@@ -35,6 +35,38 @@ WINDOW_NAME = "AirThrow"
 POLL_EVERY = 8  # frames between foreground-image checks (~3-4x/sec)
 
 
+def open_camera(index: int):
+    """Open a camera and confirm it actually delivers frames.
+
+    On Windows the default MSMF backend opens some webcams but returns no
+    frames; DirectShow (DSHOW) usually works. We try backends in order and
+    only accept one whose first read() succeeds.
+
+    Returns (cap, backend_name) or (None, reason).
+    """
+    if sys.platform.startswith("win"):
+        backends = [("DSHOW", cv2.CAP_DSHOW), ("MSMF", cv2.CAP_MSMF),
+                    ("ANY", cv2.CAP_ANY)]
+    else:
+        backends = [("V4L2", cv2.CAP_V4L2), ("ANY", cv2.CAP_ANY)]
+
+    opened_but_no_frame = False
+    for name, backend in backends:
+        cap = cv2.VideoCapture(index, backend)
+        if cap.isOpened():
+            ok, _ = cap.read()
+            if ok:
+                return cap, name
+            opened_but_no_frame = True
+            log.warning("camera %d opened via %s but gave no frame; next backend",
+                        index, name)
+        cap.release()
+
+    if opened_but_no_frame:
+        return None, "opened but delivered no frames (try another --camera index)"
+    return None, "could not open (no camera at this index?)"
+
+
 class AirThrow:
     def __init__(self, config: Config, camera_index: int = 0, debug: bool = False):
         self.config = config
@@ -95,24 +127,46 @@ class AirThrow:
                  local_ip(), self.config.listen_port, self.config.device_name)
         log.info("log file: %s", LOG_PATH)
 
-        cap = cv2.VideoCapture(self.camera_index)
-        if not cap.isOpened():
-            cap.release()
+        cap, backend = open_camera(self.camera_index)
+        if cap is None:
+            log.warning("camera %d: %s", self.camera_index, backend)
             self._run_receive_only()
             return
 
         self.detector = SwipeDetector(
             on_swipe=self.on_swipe, min_distance=self.config.swipe_min_distance
         )
-        log.info("camera %d open; swipe sensitivity=%.2f; swipe left/right to "
-                 "throw. Press q/ESC to quit.",
-                 self.camera_index, self.config.swipe_min_distance)
+        log.info("camera %d open via %s; swipe sensitivity=%.2f; swipe left/right "
+                 "to throw. Press q/ESC to quit.",
+                 self.camera_index, backend, self.config.swipe_min_distance)
+
+        # Create the window up front and keep it on top so it can't hide.
+        cv2.namedWindow(WINDOW_NAME, cv2.WINDOW_AUTOSIZE)
+        try:
+            cv2.setWindowProperty(WINDOW_NAME, cv2.WND_PROP_TOPMOST, 1)
+        except cv2.error:
+            pass
+
         frame_no = 0
+        read_fails = 0
         try:
             while True:
                 ok, frame = cap.read()
                 if not ok:
+                    read_fails += 1
+                    if read_fails in (1, 30) or read_fails % 150 == 0:
+                        log.warning("no frame from camera %d (%d in a row)",
+                                    self.camera_index, read_fails)
+                    if read_fails > 300:
+                        log.error("camera %d stopped delivering frames; switching "
+                                  "to receive-only", self.camera_index)
+                        cap.release()
+                        cv2.destroyAllWindows()
+                        self._run_receive_only()
+                        return
+                    cv2.waitKey(10)
                     continue
+                read_fails = 0
                 frame = cv2.flip(frame, 1)  # mirror: feels natural
                 self._update_fps()
 
@@ -123,7 +177,12 @@ class AirThrow:
 
                 frame, _ = self.detector.process(frame)
                 self._draw_overlay(frame)
-                cv2.imshow(WINDOW_NAME, frame)
+                try:
+                    cv2.imshow(WINDOW_NAME, frame)
+                except cv2.error as exc:
+                    log.error("cv2.imshow failed (no GUI backend in this build?): "
+                              "%s", exc)
+                    break
 
                 key = cv2.waitKey(1) & 0xFF
                 if key in (27, ord("q")):  # ESC or q
@@ -221,6 +280,27 @@ class AirThrow:
         arrow = "" if not cur_dx else ("-> right" if cur_dx > 0 else "<- left")
         cv2.putText(frame, f"swipe {progress*100:3.0f}%  dx={cur_dx:+.2f} {arrow}",
                     (bar_x, bar_y + 32), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1)
+
+
+def probe_cameras(max_index: int = 4) -> None:
+    """Report which camera indices actually deliver frames (diagnostic)."""
+    print("Probing cameras (index 0..%d)..." % (max_index - 1))
+    found = False
+    for index in range(max_index):
+        cap, backend = open_camera(index)
+        if cap is not None:
+            w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+            h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+            print(f"  index {index}: OK via {backend} backend, {w}x{h}")
+            cap.release()
+            found = True
+        else:
+            print(f"  index {index}: {backend}")
+    if found:
+        print("\nUse a working index with:  airthrow run --camera <index>")
+    else:
+        print("\nNo camera delivered frames. Check it isn't used by another app, "
+              "and (Linux) that you're in the 'video' group.")
 
 
 def open_with_default_app(path: Path) -> None:

@@ -25,6 +25,11 @@ def cmd_run(args):
     run(camera_index=args.camera, debug=args.debug)
 
 
+def cmd_camtest(args):
+    from .app import probe_cameras
+    probe_cameras()
+
+
 def cmd_selftest(args):
     """Load the hand model and process one blank frame (no camera needed)."""
     import numpy as np
@@ -127,6 +132,10 @@ def build_parser() -> argparse.ArgumentParser:
     r.set_defaults(func=cmd_run)
 
     sub.add_parser("info", help="show this device's name/IP/port").set_defaults(func=cmd_info)
+
+    sub.add_parser(
+        "camtest", help="probe camera indices and report which deliver frames"
+    ).set_defaults(func=cmd_camtest)
 
     sub.add_parser(
         "selftest", help="load the hand model & process a frame (no camera)"
