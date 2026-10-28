@@ -25,6 +25,34 @@ def cmd_run(args):
     run(camera_index=args.camera, debug=args.debug)
 
 
+def cmd_tray(args):
+    from .tray import run_tray
+    run_tray(camera_index=args.camera)
+
+
+def cmd_set_gesture(args):
+    cfg = Config.load()
+    cfg.gesture_mode = args.mode
+    cfg.save()
+    if args.mode == "grab":
+        print("Gesture: grab-and-throw (make a fist to pick up, move, open hand "
+              "to send).")
+    else:
+        print("Gesture: swipe (flick your hand left/right).")
+
+
+def cmd_autostart(args):
+    from . import autostart
+    if args.action == "on":
+        where = autostart.enable()
+        print(f"Autostart enabled -> {where}")
+    elif args.action == "off":
+        removed = autostart.disable()
+        print("Autostart disabled." if removed else "Autostart was not set.")
+    else:  # status
+        print(f"Autostart: {'on' if autostart.status() else 'off'}")
+
+
 def cmd_camtest(args):
     from .app import probe_cameras
     probe_cameras()
@@ -47,6 +75,9 @@ def cmd_info(args):
     print(f"  device name : {cfg.device_name}")
     print(f"  LAN address : {local_ip()}:{cfg.listen_port}")
     print(f"  peers to add on OTHER machines: --ip {local_ip()} --port {cfg.listen_port}")
+    from . import autostart
+    print(f"  gesture     : {cfg.gesture_mode} (grab = fist pick-and-throw; swipe = flick)")
+    print(f"  autostart   : {'on' if autostart.status() else 'off'}")
     print(f"  sensitivity : {cfg.swipe_min_distance:.2f} (swipe travel needed; lower = easier)")
     print(f"  auto-open   : {'on' if cfg.auto_open else 'off'} (open received images automatically)")
     print(f"  resend-block: {cfg.resend_block_seconds:.0f}s (ignore same file->same peer repeats; 0 = off)")
@@ -144,6 +175,18 @@ def build_parser() -> argparse.ArgumentParser:
     r.add_argument("--debug", action="store_true",
                    help="verbose logs + on-screen diagnostic overlay")
     r.set_defaults(func=cmd_run)
+
+    tr = sub.add_parser("tray", help="run in the background with a tray icon")
+    tr.add_argument("--camera", type=int, default=0, help="camera index (default 0)")
+    tr.set_defaults(func=cmd_tray)
+
+    sg = sub.add_parser("set-gesture", help="choose gesture: grab or swipe")
+    sg.add_argument("mode", choices=("grab", "swipe"))
+    sg.set_defaults(func=cmd_set_gesture)
+
+    au = sub.add_parser("autostart", help="start on login: on/off/status")
+    au.add_argument("action", choices=("on", "off", "status"))
+    au.set_defaults(func=cmd_autostart)
 
     sub.add_parser("info", help="show this device's name/IP/port").set_defaults(func=cmd_info)
 

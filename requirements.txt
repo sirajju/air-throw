@@ -4,4 +4,6 @@ uvicorn[standard]>=0.30
 python-multipart>=0.0.9
 requests>=2.31
 psutil>=5.9
+pystray>=0.19
+pillow>=10.0
 pywin32>=306 ; sys_platform == "win32"

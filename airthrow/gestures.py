@@ -1,12 +1,16 @@
-"""Hand-gesture detection: swipe left / swipe right via MediaPipe Hands.
+"""Hand-gesture detection via MediaPipe Hands (Tasks API / HandLandmarker).
 
-Uses MediaPipe's Tasks API (HandLandmarker) — the legacy `mediapipe.solutions`
-API was removed in MediaPipe 1.x. The model file ships in airthrow/assets.
+Two gesture modes share one hand tracker (BaseHandDetector):
 
-We track the horizontal position of the palm across frames. A fast horizontal
-sweep that covers enough of the frame within a short time window counts as a
-"throw" in that direction. A cooldown prevents one physical swipe from firing
-repeatedly. The detector draws the hand skeleton onto each frame for feedback.
+* SwipeDetector — flick the palm left/right. Simple; fires on fast horizontal
+  motion regardless of hand pose.
+* GrabDetector — Huawei-style "pick and throw": make a fist to pick up the
+  current image, move your hand toward the target, then open your hand to
+  release/send. Far fewer accidental sends because it needs a deliberate
+  grab + release.
+
+The legacy `mediapipe.solutions` API was removed in MediaPipe 1.x, so we use
+the Tasks API; the model file ships in airthrow/assets.
 """
 
 from __future__ import annotations
@@ -27,12 +31,13 @@ from .logs import get_logger
 log = get_logger()
 
 # Tunables — these feel right for a webcam at arm's length; adjust to taste.
-# SWIPE_MIN_DISTANCE is the default; it can be overridden per-device via config
-# (set-sensitivity) and passed into SwipeDetector.
 SWIPE_MIN_DISTANCE = 0.22   # fraction of frame width the palm must travel
-SWIPE_MAX_DURATION = 0.6    # seconds; the travel must happen at least this fast
-HISTORY_SECONDS = 0.8       # how much motion history to keep
-COOLDOWN_SECONDS = 1.5      # ignore new swipes for this long after one fires
+SWIPE_MAX_DURATION = 0.6    # seconds; swipe travel must happen at least this fast
+HISTORY_SECONDS = 0.8       # how much motion history to keep (swipe)
+COOLDOWN_SECONDS = 1.5      # ignore new gestures for this long after one fires
+
+GRAB_FRAMES = 3             # consecutive fist frames to "pick up"
+RELEASE_FRAMES = 2          # consecutive open-hand frames to "release"
 
 # 21-point hand skeleton edges (same topology as MediaPipe's HAND_CONNECTIONS).
 HAND_CONNECTIONS = [
@@ -51,21 +56,48 @@ class _Sample:
     x: float  # palm x, normalised 0..1 (in the mirrored display's space)
 
 
-class SwipeDetector:
-    def __init__(self, on_swipe: Callable[[str], None],
-                 min_distance: float = SWIPE_MIN_DISTANCE):
-        self.on_swipe = on_swipe
+# --------------------------------------------------------------------------
+# Finger-pose helpers (orientation-robust: radial distance from the wrist)
+# --------------------------------------------------------------------------
+def _dist(a, b) -> float:
+    return ((a.x - b.x) ** 2 + (a.y - b.y) ** 2) ** 0.5
+
+
+def extended_finger_count(lm) -> int:
+    """How many of index/middle/ring/pinky are extended. A finger is extended
+    when its tip is farther from the wrist than its middle (pip) joint — this
+    holds whatever way the hand is rotated, unlike comparing y-coordinates."""
+    count = 0
+    for tip, pip in ((8, 6), (12, 10), (16, 14), (20, 18)):
+        if _dist(lm[tip], lm[0]) > _dist(lm[pip], lm[0]):
+            count += 1
+    return count
+
+
+def is_fist(lm) -> bool:
+    return extended_finger_count(lm) <= 1
+
+
+def is_open_hand(lm) -> bool:
+    return extended_finger_count(lm) >= 3
+
+
+# --------------------------------------------------------------------------
+# Shared hand tracker
+# --------------------------------------------------------------------------
+class BaseHandDetector:
+    def __init__(self, min_distance: float = SWIPE_MIN_DISTANCE):
         self.min_distance = min_distance
-        self.history: deque[_Sample] = deque()
-        self.last_fire = 0.0
         self._start = time.time()
         self._last_ts = -1  # ms; detect_for_video needs strictly-increasing ts
 
         # Live telemetry for the debug overlay / logs (updated each frame).
         self.hand_present = False
         self.palm_x: float | None = None
-        self.cur_dx = 0.0   # signed travel across the current history window
-        self.cur_dt = 0.0   # seconds spanned by that window
+        self.cur_dx = 0.0
+        self.cur_dt = 0.0
+        self.grabbed = False      # set by GrabDetector; always False for swipe
+        self.fingers = 0
 
         options = vision.HandLandmarkerOptions(
             base_options=mp_python.BaseOptions(
@@ -83,15 +115,14 @@ class SwipeDetector:
         self._landmarker.close()
 
     def process(self, frame_bgr):
-        """Process one BGR frame (already mirrored for display). Returns the
-        same frame with hand landmarks drawn and the detected direction (or
-        None)."""
+        """Process one BGR frame (already mirrored). Returns (frame, direction)
+        with the hand skeleton drawn on."""
         now = time.time()
         rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
         mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
 
         ts = int((now - self._start) * 1000)
-        if ts <= self._last_ts:  # guarantee strictly increasing timestamps
+        if ts <= self._last_ts:
             ts = self._last_ts + 1
         self._last_ts = ts
 
@@ -99,25 +130,48 @@ class SwipeDetector:
 
         direction = None
         if result.hand_landmarks:
-            landmarks = result.hand_landmarks[0]
-            _draw_hand(frame_bgr, landmarks)
-            # Landmark 9 = base of middle finger ≈ palm centre.
-            palm_x = landmarks[9].x
+            lm = result.hand_landmarks[0]
             self.hand_present = True
-            self.palm_x = palm_x
-            self.history.append(_Sample(now, palm_x))
-            direction = self._detect(now)
+            self.palm_x = lm[9].x
+            self.fingers = extended_finger_count(lm)
+            direction = self._update(lm, now)
+            colour = (0, 220, 0) if self.grabbed else (0, 220, 255)
+            _draw_hand(frame_bgr, lm, colour)
         else:
             self.hand_present = False
             self.palm_x = None
             self.cur_dx = 0.0
             self.cur_dt = 0.0
-            self.history.clear()
+            self.fingers = 0
+            self._reset()
 
         return frame_bgr, direction
 
-    def _detect(self, now: float) -> str | None:
-        # Drop stale samples.
+    # Subclasses implement the gesture logic.
+    def _update(self, lm, now: float) -> str | None:
+        raise NotImplementedError
+
+    def _reset(self) -> None:
+        pass
+
+
+# --------------------------------------------------------------------------
+# Swipe gesture
+# --------------------------------------------------------------------------
+class SwipeDetector(BaseHandDetector):
+    def __init__(self, on_swipe: Callable[[str], None],
+                 min_distance: float = SWIPE_MIN_DISTANCE):
+        super().__init__(min_distance)
+        self.on_swipe = on_swipe
+        self.history: deque[_Sample] = deque()
+        self.last_fire = 0.0
+
+    def _reset(self) -> None:
+        self.history.clear()
+
+    def _update(self, lm, now: float) -> str | None:
+        self.history.append(_Sample(now, lm[9].x))
+
         while self.history and now - self.history[0].t > HISTORY_SECONDS:
             self.history.popleft()
         if len(self.history) < 3:
@@ -128,12 +182,11 @@ class SwipeDetector:
         start, end = self.history[0], self.history[-1]
         dx = end.x - start.x
         dt = end.t - start.t
-        self.cur_dx = dx  # exposed for the overlay/log every frame
+        self.cur_dx = dx
         self.cur_dt = dt
 
         in_cooldown = now - self.last_fire < COOLDOWN_SECONDS
-        if (not in_cooldown
-                and abs(dx) >= self.min_distance
+        if (not in_cooldown and abs(dx) >= self.min_distance
                 and 0 < dt <= SWIPE_MAX_DURATION):
             direction = "right" if dx > 0 else "left"
             self.last_fire = now
@@ -142,7 +195,6 @@ class SwipeDetector:
             self.on_swipe(direction)
             return direction
 
-        # Near-miss diagnostics: a fast-enough swipe that fell just short.
         if (not in_cooldown and 0 < dt <= SWIPE_MAX_DURATION
                 and abs(dx) >= self.min_distance * 0.6):
             log.debug("near-miss dx=%+.2f (need %.2f) dt=%.0fms",
@@ -150,11 +202,75 @@ class SwipeDetector:
         return None
 
 
-def _draw_hand(frame, landmarks) -> None:
+# --------------------------------------------------------------------------
+# Grab-and-throw gesture (Huawei-style)
+# --------------------------------------------------------------------------
+class GrabDetector(BaseHandDetector):
+    """Fist = pick up; move; open hand = release toward a direction."""
+
+    def __init__(self, on_throw: Callable[[str], None],
+                 on_pick: Callable[[], None] | None = None,
+                 on_cancel: Callable[[], None] | None = None,
+                 min_distance: float = SWIPE_MIN_DISTANCE):
+        super().__init__(min_distance)
+        self.on_throw = on_throw
+        self.on_pick = on_pick or (lambda: None)
+        self.on_cancel = on_cancel or (lambda: None)
+        self.last_fire = 0.0
+        self._grab_x = 0.0
+        self._fist_frames = 0
+        self._open_frames = 0
+
+    def _reset(self) -> None:
+        # Hand lost: cancel an in-progress grab.
+        if self.grabbed:
+            log.info("grab cancelled (hand lost)")
+            self.on_cancel()
+        self.grabbed = False
+        self._fist_frames = 0
+        self._open_frames = 0
+
+    def _update(self, lm, now: float) -> str | None:
+        fist = is_fist(lm)
+        openh = is_open_hand(lm)
+        palm_x = lm[9].x
+
+        if not self.grabbed:
+            if now - self.last_fire < COOLDOWN_SECONDS:
+                return None
+            self._fist_frames = self._fist_frames + 1 if fist else 0
+            if self._fist_frames >= GRAB_FRAMES:
+                self.grabbed = True
+                self._grab_x = palm_x
+                self._open_frames = 0
+                self.cur_dx = 0.0
+                log.info("GRAB (picked up)")
+                self.on_pick()
+            return None
+
+        # Grabbed: track travel since the grab point.
+        self.cur_dx = palm_x - self._grab_x
+        self._open_frames = self._open_frames + 1 if openh else 0
+        if self._open_frames >= RELEASE_FRAMES:
+            dx = self.cur_dx
+            self.grabbed = False
+            self._fist_frames = 0
+            self.last_fire = now
+            if abs(dx) >= self.min_distance:
+                direction = "right" if dx > 0 else "left"
+                log.info("THROW %s (released, dx=%+.2f)", direction, dx)
+                self.on_throw(direction)
+                return direction
+            log.info("released without enough travel (dx=%+.2f) — cancelled", dx)
+            self.on_cancel()
+        return None
+
+
+def _draw_hand(frame, landmarks, colour=(0, 220, 255)) -> None:
     """Draw the 21-point hand skeleton onto the BGR frame."""
     h, w = frame.shape[:2]
     pts = [(int(lm.x * w), int(lm.y * h)) for lm in landmarks]
     for a, b in HAND_CONNECTIONS:
         cv2.line(frame, pts[a], pts[b], (255, 255, 255), 2)
     for (x, y) in pts:
-        cv2.circle(frame, (x, y), 4, (0, 220, 255), -1)
+        cv2.circle(frame, (x, y), 4, colour, -1)

@@ -30,12 +30,15 @@ Two ways to run AirThrow: a **standalone executable** (no Python needed) or
 Build a single-file executable for your OS (PyInstaller cannot cross-compile, so
 each binary is built on its own OS):
 
-**Windows** → produces `dist\airthrow.exe`
+Each build produces **two** executables: `airthrow` (console CLI) and
+`airthrow-tray` (windowed, no console — the background tray app).
+
+**Windows** → `dist\airthrow.exe` + `dist\airthrow-tray.exe`
 ```powershell
 powershell -ExecutionPolicy Bypass -File build.ps1
 ```
 
-**Linux** → produces `dist/airthrow` (run on a Linux machine)
+**Linux** → `dist/airthrow` + `dist/airthrow-tray` (run on a Linux machine)
 ```bash
 ./build-linux.sh
 ```
@@ -105,23 +108,56 @@ A mirrored webcam window opens showing your left/right peers and the currently
 open image. Then:
 
 1. Open an image in any viewer (Photos, your browser, IrfanView, `eog`, …).
-2. Swipe your hand **left** or **right** in front of the camera.
+2. Make the **gesture** (see below) toward **left** or **right**.
 3. The open image flies to that direction's peer and lands in its
    `~/.airthrow/Received` folder — and **opens automatically** in the default
    viewer on the receiving machine (turn off with `set-auto-open off`).
 
 Press `q` or `Esc` to quit.
 
-**Which way?** The view is mirrored, so swiping your hand **to your right**
-sends to the **right** peer and **to your left** sends to the **left** peer. If
-a swipe does nothing, check the `--debug` overlay: the progress bar must reach
-100%. Too hard to trigger? Lower it, e.g. `set-sensitivity 0.18`.
+### Gestures
+
+Two modes (`set-gesture grab|swipe`, default **grab**):
+
+- **grab** (Huawei-style, default): make a **fist** to *pick up* the open image
+  (overlay shows "Picked up …"), move your hand toward the target, then **open
+  your hand** to release/send. Opening without moving far enough cancels — so
+  accidental sends are rare.
+- **swipe**: just **flick** your hand left or right. Simpler, but fires on any
+  fast motion.
+
+**Which way?** The view is mirrored, so moving your hand **to your right** sends
+to the **right** peer and **to your left** sends to the **left** peer. If a
+gesture does nothing, check the `--debug` overlay: the progress bar must reach
+100%. Too touchy or too hard? Tune with `set-sensitivity <d>`.
+
+## Run in the background (tray app)
+
+Instead of the foreground preview, run AirThrow as a **system-tray app** — no
+console, no window unless you ask for it:
+
+```bash
+airthrow tray            # or launch airthrow-tray(.exe) directly (no console)
+```
+
+The tray icon menu has **Status**, **Show preview** (toggle the camera window),
+**Open received folder**, and **Quit**. Start it automatically on login with:
+
+```bash
+airthrow autostart on    # off / status also available
+```
+
+Windows adds a Startup shortcut; Linux adds `~/.config/autostart/airthrow.desktop`.
+Autostart launches the windowed `airthrow-tray` so nothing pops up but the icon.
 
 ## Commands
 
 | Command | What it does |
 |---|---|
-| `run [--camera N] [--debug]` | Start camera + gestures + receiver (receive-only if no camera) |
+| `run [--camera N] [--debug]` | Foreground: camera + gestures + preview window |
+| `tray [--camera N]` | Background: run with a system-tray icon (no console) |
+| `set-gesture <grab\|swipe>` | Choose the gesture style (default grab) |
+| `autostart <on\|off\|status>` | Start the tray app automatically on login |
 | `info` | Show this device's name, IP, port, settings and log path |
 | `set-sensitivity <d>` | Swipe travel needed to fire, 0.05 (easy) .. 0.9 (hard) |
 | `set-auto-open <on\|off>` | Auto-open received images in the default viewer |
