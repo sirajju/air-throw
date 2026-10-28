@@ -45,9 +45,12 @@ STYLES: dict[str, list[tuple[int, int, int]]] = {
     "sunset": [(255, 60, 0), (255, 150, 0), (255, 220, 70), (255, 70, 120),
                (255, 60, 0)],                         # warm fire tones
     "mono": [(0, 229, 200), (210, 255, 250), (0, 229, 200)],  # teal glow pulse
+    # Internal, not user-selectable: the green "a file landed" receive flash.
+    "incoming": [(57, 211, 83), (0, 230, 160), (120, 255, 180), (57, 211, 83)],
 }
-STYLE_NAMES = tuple(STYLES.keys())
+STYLE_NAMES = ("aurora", "rainbow", "ocean", "sunset", "mono")  # user-pickable
 DEFAULT_STYLE = "aurora"
+RECEIVE_STYLE = "incoming"
 
 
 def _build_gradient(stops):
@@ -64,6 +67,30 @@ def _build_gradient(stops):
         c1 = stops[min(a + 1, len(stops) - 1)]
         out[i] = [int(c0[k] + (c1[k] - c0[k]) * f) for k in range(3)]
     return out
+
+
+def _gradient_slice(Image, ImageTk, grad, orient, length, offset,
+                    thickness=THICKNESS):
+    """A PhotoImage of a `thickness`-wide slice of the scrolling gradient."""
+    import numpy as np
+
+    idx = (np.arange(length) + offset) % PERIOD
+    line = grad[idx]  # (length, 3)
+    if orient == "h":
+        arr = np.broadcast_to(line[None, :, :], (thickness, length, 3))
+    else:
+        arr = np.broadcast_to(line[:, None, :], (length, thickness, 3))
+    return ImageTk.PhotoImage(Image.fromarray(np.ascontiguousarray(arr), "RGB"))
+
+
+def _border_specs(x, y, w, h, t):
+    """(geometry, orientation, length) for the 4 strips framing a rectangle."""
+    return [
+        (f"{w}x{t}+{x}+{y}", "h", w),
+        (f"{w}x{t}+{x}+{y + h - t}", "h", w),
+        (f"{t}x{h}+{x}+{y}", "v", h),
+        (f"{t}x{h}+{x + w - t}+{y}", "v", h),
+    ]
 
 
 class _Flash:
@@ -90,14 +117,8 @@ class _Flash:
         self._ImageTk = ImageTk
         self._Image = Image
 
-        t = THICKNESS
         # (geometry string, orientation) for top, bottom, left, right.
-        specs = [
-            (f"{w}x{t}+{x}+{y}", "h", w),
-            (f"{w}x{t}+{x}+{y + h - t}", "h", w),
-            (f"{t}x{h}+{x}+{y}", "v", h),
-            (f"{t}x{h}+{x + w - t}+{y}", "v", h),
-        ]
+        specs = _border_specs(x, y, w, h, THICKNESS)
         for geom, orient, length in specs:
             win = tk.Toplevel(root)
             win.overrideredirect(True)
@@ -115,17 +136,8 @@ class _Flash:
         self._tick()
 
     def _slice_image(self, orient, length, offset):
-        """A PhotoImage: a THICKNESS-wide slice of the scrolling gradient."""
-        import numpy as np
-
-        idx = (np.arange(length) + offset) % PERIOD
-        line = self._grad[idx]  # (length, 3)
-        if orient == "h":
-            arr = np.broadcast_to(line[None, :, :], (THICKNESS, length, 3))
-        else:
-            arr = np.broadcast_to(line[:, None, :], (length, THICKNESS, 3))
-        img = self._Image.fromarray(np.ascontiguousarray(arr), "RGB")
-        return self._ImageTk.PhotoImage(img)
+        return _gradient_slice(self._Image, self._ImageTk, self._grad,
+                               orient, length, offset)
 
     def _tick(self):
         now = time.time()
@@ -182,6 +194,113 @@ def _make_click_through(win) -> None:
         pass  # purely cosmetic; the border still shows if this fails
 
 
+class _Selector:
+    """A centered, gradient-bordered picker listing device names.
+
+    Its border animates continuously while open, and it stays up until it is
+    explicitly hidden — it is NOT tied to per-frame hand presence, so a flickery
+    gesture can't make it blink. The app decides which row is highlighted and
+    when to confirm; this class only draws.
+    """
+
+    PAD = 16
+    ROW_H = 38
+    TITLE_H = 40
+
+    def __init__(self, manager, root, gradient, names, title):
+        self._mgr = manager
+        self._root = root
+        self._grad = gradient
+        self._names = list(names)
+        self._index = 0
+        self._alive = True
+        self._strips = []
+        self._row_labels = []
+
+        import tkinter as tk
+        from PIL import Image, ImageTk
+        self._tk, self._Image, self._ImageTk = tk, Image, ImageTk
+
+        longest = max([len(title)] + [len(n) for n in self._names] + [8])
+        pw = min(max(300, longest * 12 + 90), root.winfo_screenwidth() - 80)
+        ph = self.TITLE_H + len(self._names) * self.ROW_H + self.PAD
+        sw, sh = root.winfo_screenwidth(), root.winfo_screenheight()
+        px = (sw - pw) // 2
+        py = (sh - ph) // 2
+
+        # Animated gradient border framing the panel.
+        bx, by = px - THICKNESS, py - THICKNESS
+        bw, bh = pw + 2 * THICKNESS, ph + 2 * THICKNESS
+        for geom, orient, length in _border_specs(bx, by, bw, bh, THICKNESS):
+            win = tk.Toplevel(root)
+            win.overrideredirect(True)
+            win.attributes("-topmost", True)
+            win.geometry(geom)
+            lbl = tk.Label(win, bd=0, highlightthickness=0, bg="#000000")
+            lbl.pack(fill="both", expand=True)
+            _make_click_through(win)
+            self._strips.append([win, lbl, orient, max(1, length)])
+
+        # The dark panel with the title + one row per device.
+        panel = tk.Toplevel(root)
+        panel.overrideredirect(True)
+        panel.attributes("-topmost", True)
+        panel.geometry(f"{pw}x{ph}+{px}+{py}")
+        panel.configure(bg="#1b1d23")
+        self._panel = panel
+        tk.Label(panel, text=title, bg="#1b1d23", fg="#00e5c8",
+                 font=("Segoe UI Semibold", 13)).pack(pady=(10, 4))
+        rows = tk.Frame(panel, bg="#1b1d23")
+        rows.pack(fill="both", expand=True, padx=10)
+        for name in self._names:
+            row = tk.Label(rows, text=name, anchor="w", bg="#23262e",
+                           fg="#e6e8ee", font=("Segoe UI", 12), padx=14, pady=6)
+            row.pack(fill="x", pady=2)
+            self._row_labels.append(row)
+        _make_click_through(panel)
+
+        self.set_index(0)
+        self._animate()
+
+    def set_index(self, index: int) -> None:
+        if not self._names:
+            return
+        self._index = index % len(self._names)
+        for i, row in enumerate(self._row_labels):
+            if i == self._index:
+                row.configure(bg="#00e5c8", fg="#06231f",
+                              text=f"▶  {self._names[i]}")
+            else:
+                row.configure(bg="#23262e", fg="#e6e8ee", text=self._names[i])
+
+    def current(self) -> int:
+        return self._index
+
+    def _animate(self) -> None:
+        if not self._alive:
+            return
+        offset = int(time.time() * SCROLL_PX_PER_S) % PERIOD
+        for win, lbl, orient, length in self._strips:
+            photo = _gradient_slice(self._Image, self._ImageTk, self._grad,
+                                    orient, length, offset)
+            lbl.configure(image=photo)
+            lbl.image = photo
+        self._root.after(FRAME_MS, self._animate)
+
+    def destroy(self) -> None:
+        self._alive = False
+        for win, *_ in self._strips:
+            try:
+                win.destroy()
+            except Exception:
+                pass
+        self._strips.clear()
+        try:
+            self._panel.destroy()
+        except Exception:
+            pass
+
+
 class _Manager:
     """Owns the single Tk root + overlay thread; dispatches flash requests."""
 
@@ -192,6 +311,7 @@ class _Manager:
         self._root = None
         self._grad_cache: dict[str, object] = {}  # style name -> gradient array
         self._active: set[_Flash] = set()
+        self._selector: _Selector | None = None
 
     def flash(self, rect, duration: float = DEFAULT_DURATION,
               style: str | None = None) -> None:
@@ -200,7 +320,21 @@ class _Manager:
         call from any thread."""
         if not self._ensure_thread():
             return
-        self._q.put((rect, duration, style or DEFAULT_STYLE))
+        self._q.put(("flash", rect, duration, style or DEFAULT_STYLE))
+
+    def selector_show(self, names, title: str = "Throw to…",
+                      style: str | None = None) -> None:
+        if not self._ensure_thread():
+            return
+        self._q.put(("sel_show", list(names), title, style or DEFAULT_STYLE))
+
+    def selector_set(self, index: int) -> None:
+        if self._thread and self._thread.is_alive():
+            self._q.put(("sel_set", index))
+
+    def selector_hide(self) -> None:
+        if self._thread and self._thread.is_alive():
+            self._q.put(("sel_hide",))
 
     def _gradient_for(self, style: str):
         if style not in self._grad_cache:
@@ -236,16 +370,34 @@ class _Manager:
     def _poll(self) -> None:
         try:
             while True:
-                rect, duration, style = self._q.get_nowait()
+                cmd = self._q.get_nowait()
                 try:
-                    gradient = self._gradient_for(style)
-                    self._active.add(_Flash(self, self._root, gradient,
-                                            rect, duration))
+                    self._dispatch(cmd)
                 except Exception as exc:
-                    log.debug("could not show send border: %s", exc)
+                    log.debug("overlay command %s failed: %s", cmd[0], exc)
         except queue.Empty:
             pass
         self._root.after(40, self._poll)
+
+    def _dispatch(self, cmd) -> None:
+        kind = cmd[0]
+        if kind == "flash":
+            _, rect, duration, style = cmd
+            gradient = self._gradient_for(style)
+            self._active.add(_Flash(self, self._root, gradient, rect, duration))
+        elif kind == "sel_show":
+            _, names, title, style = cmd
+            if self._selector:
+                self._selector.destroy()
+            self._selector = _Selector(self, self._root,
+                                       self._gradient_for(style), names, title)
+        elif kind == "sel_set":
+            if self._selector:
+                self._selector.set_index(cmd[1])
+        elif kind == "sel_hide":
+            if self._selector:
+                self._selector.destroy()
+                self._selector = None
 
     def _done(self, flash: _Flash) -> None:
         self._active.discard(flash)
@@ -258,3 +410,19 @@ def flash(rect, duration: float = DEFAULT_DURATION,
           style: str | None = None) -> None:
     """Public entrypoint — see :meth:`_Manager.flash`."""
     _manager.flash(rect, duration, style)
+
+
+def selector_show(names, title: str = "Throw to…",
+                  style: str | None = None) -> None:
+    """Open the device picker listing ``names`` (stays up until hidden)."""
+    _manager.selector_show(names, title, style)
+
+
+def selector_set(index: int) -> None:
+    """Highlight row ``index`` in the open picker."""
+    _manager.selector_set(index)
+
+
+def selector_hide() -> None:
+    """Close the picker."""
+    _manager.selector_hide()

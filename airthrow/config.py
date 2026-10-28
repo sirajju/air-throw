@@ -50,8 +50,12 @@ class Config:
     show_send_animation: bool = True
     # Which border style to use (see send_overlay.STYLES): aurora/rainbow/...
     send_animation_style: str = "aurora"
-    # direction slot -> Peer (or missing if unassigned)
+    # direction slot -> Peer (or missing if unassigned). Used for the fast
+    # 2-device path (swipe left/right sends straight away).
     peers: dict[str, Peer] = field(default_factory=dict)
+    # Extra named devices beyond left/right. When the total number of devices
+    # is 3+, a swipe opens an on-screen picker instead of sending immediately.
+    devices: list[Peer] = field(default_factory=list)
 
     # ---- persistence -------------------------------------------------
     @classmethod
@@ -76,6 +80,7 @@ class Config:
             show_send_animation=bool(raw.get("show_send_animation", True)),
             send_animation_style=raw.get("send_animation_style", "aurora"),
             peers=peers,
+            devices=[Peer(**d) for d in raw.get("devices", []) if d],
         )
 
     def save(self) -> None:
@@ -91,6 +96,7 @@ class Config:
             "show_send_animation": self.show_send_animation,
             "send_animation_style": self.send_animation_style,
             "peers": {slot: asdict(peer) for slot, peer in self.peers.items()},
+            "devices": [asdict(d) for d in self.devices],
         }
         CONFIG_PATH.write_text(json.dumps(data, indent=2), encoding="utf-8")
 
@@ -107,6 +113,42 @@ class Config:
 
     def peer_for(self, direction: str) -> Peer | None:
         return self.peers.get(direction)
+
+    # ---- multi-device --------------------------------------------------
+    def add_device(self, name: str, ip: str, port: int = DEFAULT_PORT) -> None:
+        """Add (or update by name) an extra device for the picker menu."""
+        self.devices = [d for d in self.devices if d.name != name]
+        self.devices.append(Peer(name=name, ip=ip, port=port))
+        self.save()
+
+    def remove_device(self, name: str) -> bool:
+        before = len(self.devices)
+        self.devices = [d for d in self.devices if d.name != name]
+        self.save()
+        return len(self.devices) != before
+
+    def all_devices(self) -> list[Peer]:
+        """Every target to choose from: left, right, then extras, de-duped by
+        address. This is what the on-screen picker lists."""
+        ordered: list[Peer] = []
+        for slot in SLOTS:
+            peer = self.peers.get(slot)
+            if peer:
+                ordered.append(peer)
+        ordered.extend(self.devices)
+        seen: set[tuple[str, int]] = set()
+        unique: list[Peer] = []
+        for p in ordered:
+            key = (p.ip, p.port)
+            if key not in seen:
+                seen.add(key)
+                unique.append(p)
+        return unique
+
+    def use_picker(self) -> bool:
+        """True when there are 3+ devices, so a swipe should open the picker
+        instead of sending straight to a left/right slot."""
+        return len(self.all_devices()) >= 3
 
 
 def local_ip() -> str:

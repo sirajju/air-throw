@@ -31,6 +31,7 @@ log = get_logger()
 
 WINDOW_NAME = "AirThrow"
 POLL_EVERY = 8  # frames between foreground-image checks (~3-4x/sec)
+PICKER_CONFIRM_DELAY = 1.8  # seconds of no swipe before the picker auto-sends
 
 
 def open_camera(index: int):
@@ -76,6 +77,18 @@ class AirThrow:
         self.last_image_rect: tuple[int, int, int, int] | None = None
         self._held_image: Path | None = None  # locked at grab-time (grab mode)
         self._held_rect: tuple[int, int, int, int] | None = None
+
+        # Device picker (shown when there are 3+ devices): a swipe opens it,
+        # further swipes move the highlight, and after a short dwell with no new
+        # swipe it sends to the highlighted device. The dwell timer resets on
+        # every swipe, which debounces a flickery gesture so the box is stable.
+        self._picker_lock = threading.Lock()
+        self._picker_active = False
+        self._picker_devices: list = []
+        self._picker_index = 0
+        self._picker_image: Path | None = None
+        self._picker_rect: tuple[int, int, int, int] | None = None
+        self._picker_timer: threading.Timer | None = None
         self.status = "Ready"
         self.status_color = (255, 255, 255)
         self.status_until = 0.0
@@ -100,6 +113,12 @@ class AirThrow:
     # ---- events ------------------------------------------------------
     def on_received(self, sender: str, filename: str, path: Path):
         self.set_status(f"Received {filename} from {sender}", (0, 220, 0), 6)
+        if self.config.show_send_animation:
+            # Green "it landed" border flashed full-screen on the receiver.
+            try:
+                send_overlay.flash(None, style=send_overlay.RECEIVE_STYLE)
+            except Exception as exc:
+                log.debug("receive animation failed: %s", exc)
         if self.config.auto_open:
             open_with_default_app(path)
 
@@ -126,7 +145,61 @@ class AirThrow:
         rect = self._held_rect or self.last_image_rect
         self._held_image = None
         self._held_rect = None
-        self._do_throw(direction, image, rect)
+        if self.config.use_picker():
+            self._picker_swipe(direction, image, rect)
+        else:
+            self._do_throw(direction, image, rect)
+
+    # ---- device picker (3+ devices) ---------------------------------
+    def _picker_swipe(self, direction: str, image: Path | None, rect):
+        """First swipe opens the picker; later swipes move the highlight. A
+        dwell (no swipe for PICKER_CONFIRM_DELAY) confirms and sends."""
+        with self._picker_lock:
+            if not self._picker_active:
+                devices = self.config.all_devices()
+                if not devices:
+                    self.set_status("No devices configured", (0, 180, 255))
+                    return
+                self._picker_devices = devices
+                self._picker_image = image
+                self._picker_rect = rect
+                self._picker_index = 0 if direction == "right" else len(devices) - 1
+                self._picker_active = True
+                names = [d.name for d in devices]
+                send_overlay.selector_show(
+                    names, title="Throw to…",
+                    style=self.config.send_animation_style)
+                send_overlay.selector_set(self._picker_index)
+                log.info("picker opened (%d devices)", len(devices))
+            else:
+                step = 1 if direction == "right" else -1
+                self._picker_index = ((self._picker_index + step)
+                                      % len(self._picker_devices))
+                send_overlay.selector_set(self._picker_index)
+            name = self._picker_devices[self._picker_index].name
+            self.set_status(f"Pick: {name}  (swipe to move, hold to send)",
+                            (0, 220, 255), 6)
+            self._arm_picker_confirm()
+
+    def _arm_picker_confirm(self):
+        if self._picker_timer:
+            self._picker_timer.cancel()
+        self._picker_timer = threading.Timer(PICKER_CONFIRM_DELAY,
+                                              self._confirm_pick)
+        self._picker_timer.daemon = True
+        self._picker_timer.start()
+
+    def _confirm_pick(self):
+        with self._picker_lock:
+            if not self._picker_active:
+                return
+            device = self._picker_devices[self._picker_index]
+            image, rect = self._picker_image, self._picker_rect
+            self._picker_active = False
+            self._picker_timer = None
+        send_overlay.selector_hide()
+        log.info("picker confirmed -> %s", device.name)
+        self._throw_to_peer(device, image, rect, ">>")
 
     def _do_throw(self, direction: str, image: Path | None,
                   rect: tuple[int, int, int, int] | None = None):
@@ -136,8 +209,11 @@ class AirThrow:
             log.warning("throw %s but no peer in '%s' slot", direction, direction)
             self.set_status(f"{arrow} No peer in '{direction}' slot", (0, 180, 255))
             return
+        self._throw_to_peer(peer, image, rect, arrow)
+
+    def _throw_to_peer(self, peer, image: Path | None, rect, arrow: str = ">>"):
         if not image:
-            log.warning("throw %s to %s but no image to send", direction, peer.name)
+            log.warning("throw to %s but no image to send", peer.name)
             self.set_status(f"{arrow} No image open to throw", (0, 180, 255))
             return
 

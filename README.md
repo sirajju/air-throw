@@ -97,6 +97,25 @@ python -m airthrow ping right # confirm it's reachable (start it first)
 
 `set-peer <slot> <name> <ip> [port]` where `<slot>` is `left` or `right`.
 
+### More than two devices
+
+Left/right is the fast path for two peers. For **three or more**, add extra named
+devices and AirThrow switches to an **on-screen picker**:
+
+```bash
+python -m airthrow add-device "Salah-Laptop" 192.168.0.40
+python -m airthrow add-device "Bedroom-PC"   192.168.0.41
+python -m airthrow devices         # list all targets; shows if the picker is on
+python -m airthrow preview-select  # simulate the picker (no send) to see it
+```
+
+Once there are 3+ targets, a throw gesture **opens a gradient-bordered picker**
+listing every device. **Swipe** to move the highlight, then **hold** (stop
+swiping for ~1.8 s) and it sends to the highlighted device. The box stays put
+while you choose — a flickery gesture won't make it blink, because the dwell
+timer resets on each swipe (built-in debounce) and the box only closes when it
+confirms.
+
 ## Desktop GUI (Windows + Linux)
 
 Prefer a window to the command line? Open the **control panel** — no commands to
@@ -132,6 +151,9 @@ open image. Then:
    that direction's peer and lands in its `~/.airthrow/Received` folder, where it
    **opens automatically** in the default viewer (turn off with
    `set-auto-open off`). Turn the border off with `set-animation off`.
+
+On the **receiving** machine, a green **"it landed"** border flashes around the
+screen as each file arrives, so you get the same confirmation on both ends.
 
 **Preview the border without sending anything.** No second machine or open image
 needed — just watch it on screen:
@@ -209,6 +231,10 @@ Autostart launches the windowed `airthrow-tray` so nothing pops up but the icon.
 | `peers` | List left/right assignments |
 | `set-peer <slot> <name> <ip> [port]` | Assign a peer to a direction |
 | `clear-peer <slot>` | Unassign a slot |
+| `devices` | List all targets; 3+ enables the on-screen picker |
+| `add-device <name> <ip> [port]` | Add an extra device (beyond left/right) |
+| `remove-device <name>` | Remove an extra device |
+| `preview-select` | Simulate the device picker (no send) to see it |
 | `ping <slot>` | Check a peer is reachable |
 
 ## Tuning the gesture

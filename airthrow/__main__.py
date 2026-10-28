@@ -180,6 +180,58 @@ def cmd_set_auto_open(args):
     print(f"Auto-open received images: {'on' if cfg.auto_open else 'off'}")
 
 
+def cmd_devices(args):
+    cfg = Config.load()
+    print("Extra devices (beyond left/right):")
+    if cfg.devices:
+        for d in cfg.devices:
+            print(f"  - {d.name} @ {d.ip}:{d.port}")
+    else:
+        print("  (none)")
+    all_d = cfg.all_devices()
+    print(f"\nAll targets ({len(all_d)}):", ", ".join(d.name for d in all_d) or "(none)")
+    if cfg.use_picker():
+        print("3+ devices: a swipe opens the on-screen picker (swipe to move, "
+              "hold to send).")
+    else:
+        print("2 or fewer: swipe left/right sends straight to that slot.")
+
+
+def cmd_add_device(args):
+    cfg = Config.load()
+    cfg.add_device(args.name, args.ip, args.port)
+    print(f"Added device: {args.name} @ {args.ip}:{args.port}")
+    print(f"Now {len(cfg.all_devices())} targets; "
+          f"picker {'ON' if cfg.use_picker() else 'off (need 3+)'}.")
+
+
+def cmd_remove_device(args):
+    cfg = Config.load()
+    ok = cfg.remove_device(args.name)
+    print(f"Removed {args.name!r}" if ok else f"No device named {args.name!r}")
+
+
+def cmd_preview_select(args):
+    """Simulate the device picker (no send) so you can see it remotely."""
+    import time
+
+    from . import send_overlay
+    cfg = Config.load()
+    names = [d.name for d in cfg.all_devices()]
+    if len(names) < 2:
+        names = ["Living-Room-PC", "Studio-PC", "Salah-Laptop", "Bedroom-PC"]
+        print("(fewer than 2 real devices; showing sample names)")
+    send_overlay.selector_show(names, title="Throw to…",
+                               style=cfg.send_animation_style)
+    print("Picker shown. Cycling highlight; watch your screen...")
+    for i in range(len(names) * 2):
+        send_overlay.selector_set(i % len(names))
+        time.sleep(0.7)
+    time.sleep(0.4)
+    send_overlay.selector_hide()
+    print("Picker closed.")
+
+
 def cmd_peers(args):
     cfg = Config.load()
     for slot in SLOTS:
@@ -307,6 +359,25 @@ def build_parser() -> argparse.ArgumentParser:
     cp = sub.add_parser("clear-peer", help="unassign a slot")
     cp.add_argument("slot", choices=SLOTS)
     cp.set_defaults(func=cmd_clear_peer)
+
+    sub.add_parser("devices",
+                   help="list all targets; 3+ enables the on-screen picker"
+                   ).set_defaults(func=cmd_devices)
+
+    ad = sub.add_parser("add-device",
+                        help="add an extra named device (beyond left/right)")
+    ad.add_argument("name")
+    ad.add_argument("ip")
+    ad.add_argument("port", nargs="?", type=int, default=DEFAULT_PORT)
+    ad.set_defaults(func=cmd_add_device)
+
+    rd = sub.add_parser("remove-device", help="remove an extra device by name")
+    rd.add_argument("name")
+    rd.set_defaults(func=cmd_remove_device)
+
+    sub.add_parser("preview-select",
+                   help="simulate the device picker (no send) to see it"
+                   ).set_defaults(func=cmd_preview_select)
 
     pg = sub.add_parser("ping", help="check a slot peer is reachable")
     pg.add_argument("slot", choices=SLOTS)

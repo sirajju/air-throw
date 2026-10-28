@@ -141,6 +141,24 @@ class GUI:
         for slot in SLOTS:
             self._peer_row(peers, slot)
 
+        # Extra devices (3+ enables the picker) ------------------------
+        dev2 = self._card(outer, "More devices  (3+ shows an on-screen picker)")
+        self.dev_list = tk.Listbox(dev2, height=4, bg="#2d313b", fg=FG,
+                                   borderwidth=0, highlightthickness=0,
+                                   selectbackground=ACCENT, selectforeground="#06231f",
+                                   activestyle="none")
+        self.dev_list.pack(fill="x")
+        addrow = ttk.Frame(dev2, style="Card.TFrame"); addrow.pack(fill="x", pady=(6, 0))
+        self.v_dev_name = tk.StringVar(); self.v_dev_ip = tk.StringVar()
+        self.v_dev_port = tk.StringVar()
+        ttk.Entry(addrow, textvariable=self.v_dev_name, width=10).pack(side="left", padx=2)
+        ttk.Entry(addrow, textvariable=self.v_dev_ip, width=13).pack(side="left", padx=2)
+        ttk.Entry(addrow, textvariable=self.v_dev_port, width=6).pack(side="left", padx=2)
+        ttk.Button(addrow, text="Add", width=5, command=self._add_device).pack(side="left", padx=2)
+        ttk.Button(addrow, text="Remove", command=self._remove_device).pack(side="left")
+        ttk.Button(addrow, text="Preview picker", command=self._preview_picker).pack(side="right")
+        self._refresh_devices()
+
         # Gesture & behaviour -----------------------------------------
         beh = self._card(outer, "Gesture & behaviour")
         grow = ttk.Frame(beh, style="Card.TFrame"); grow.pack(fill="x")
@@ -296,6 +314,55 @@ class GUI:
         send_overlay.flash(None, style=style)  # frame the whole screen as a preview
         self._flash_status(f"Border preview: {style}", ACCENT)
 
+    # ---- extra devices ----------------------------------------------
+    def _refresh_devices(self):
+        self.dev_list.delete(0, tk.END)
+        for d in self.config.devices:
+            self.dev_list.insert(tk.END, f"{d.name}   {d.ip}:{d.port}")
+        n = len(self.config.all_devices())
+        tag = "picker ON" if self.config.use_picker() else "need 3+ for picker"
+        self._flash_status(f"{n} target(s) — {tag}", MUTED)
+
+    def _add_device(self):
+        name = self.v_dev_name.get().strip()
+        ip = self.v_dev_ip.get().strip()
+        if not name or not ip:
+            self._flash_status("Enter a name and IP for the device", WARN)
+            return
+        try:
+            port = int(self.v_dev_port.get().strip() or self.config.listen_port)
+        except ValueError:
+            self._flash_status("Port must be a number", WARN)
+            return
+        self.config.add_device(name, ip, port)
+        self.v_dev_name.set(""); self.v_dev_ip.set(""); self.v_dev_port.set("")
+        self._refresh_devices()
+
+    def _remove_device(self):
+        sel = self.dev_list.curselection()
+        if not sel:
+            self._flash_status("Select a device in the list to remove", WARN)
+            return
+        name = self.config.devices[sel[0]].name
+        self.config.remove_device(name)
+        self._refresh_devices()
+
+    def _preview_picker(self):
+        names = [d.name for d in self.config.all_devices()]
+        if len(names) < 2:
+            names = ["Living-Room-PC", "Studio-PC", "Salah-Laptop", "Bedroom-PC"]
+        send_overlay.selector_show(names, title="Throw to…",
+                                   style=self.v_style.get())
+        self._flash_status("Picker preview (closes shortly)", ACCENT)
+        # Cycle the highlight, then close — purely a visual demo.
+        def step(i=0):
+            if i < len(names) * 2:
+                send_overlay.selector_set(i % len(names))
+                self.root.after(650, lambda: step(i + 1))
+            else:
+                self.root.after(400, send_overlay.selector_hide)
+        step()
+
     # ---- run control -------------------------------------------------
     def _toggle_run(self):
         if self.running:
@@ -348,7 +415,8 @@ class GUI:
 
     # ---- status ------------------------------------------------------
     def _flash_status(self, text: str, color=FG):
-        self.status_lbl.configure(text=f"●  {text}", foreground=color)
+        if hasattr(self, "status_lbl"):  # may fire during UI construction
+            self.status_lbl.configure(text=f"●  {text}", foreground=color)
 
     def _poll_status(self):
         if self.running and self.app:
