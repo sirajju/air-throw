@@ -14,6 +14,9 @@ from PyInstaller.utils.hooks import collect_all, collect_submodules
 
 datas, binaries, hiddenimports = [], [], []
 
+# Our own bundled assets (the HandLandmarker model used by gestures.py).
+datas += [("airthrow/assets/hand_landmarker.task", "airthrow/assets")]
+
 # Pull everything (py modules, dynamic libs, data files) for the hard ones.
 # matplotlib is required: mediapipe imports it internally (drawing_utils) and
 # needs its bundled mpl-data, so it must be collected, not excluded.

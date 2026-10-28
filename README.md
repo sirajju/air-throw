@@ -56,8 +56,17 @@ pip install -r requirements.txt
 python -m airthrow info
 ```
 
-Either way you need a **webcam**. On **Linux**, gesture/foreground detection also
-needs `xdotool` (`sudo apt install xdotool`).
+**Sending** needs a **webcam** (that's how you gesture). **Receiving** does not —
+a machine with no camera runs in *receive-only* mode and can still accept throws.
+On **Linux**, gesture/foreground detection also needs `xdotool`
+(`sudo apt install xdotool`).
+
+Verify the hand model loads on a machine (no camera required):
+
+```bash
+python -m airthrow selftest    # or:  airthrow selftest
+# OK: hand model loaded and processed a frame (direction=None).
+```
 
 ## Setup (do this on BOTH machines)
 
@@ -106,8 +115,9 @@ Press `q` or `Esc` to quit.
 
 | Command | What it does |
 |---|---|
-| `run [--camera N]` | Start camera + gestures + receiver |
+| `run [--camera N]` | Start camera + gestures + receiver (receive-only if no camera) |
 | `info` | Show this device's name, IP and port |
+| `selftest` | Load the hand model and process a frame (no camera needed) |
 | `set-name <name>` | Set the name peers see |
 | `peers` | List left/right assignments |
 | `set-peer <slot> <name> <ip> [port]` | Assign a peer to a direction |

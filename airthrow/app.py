@@ -76,10 +76,9 @@ class AirThrow:
 
         cap = cv2.VideoCapture(self.camera_index)
         if not cap.isOpened():
-            raise RuntimeError(
-                f"Could not open camera index {self.camera_index}. "
-                "Close other apps using it, or pass a different --camera."
-            )
+            cap.release()
+            self._run_receive_only()
+            return
 
         detector = SwipeDetector(on_swipe=self.on_swipe)
         frame_no = 0
@@ -106,6 +105,20 @@ class AirThrow:
             detector.close()
             cap.release()
             cv2.destroyAllWindows()
+
+    def _run_receive_only(self):
+        """No usable camera: stay alive as a receiver so this machine can still
+        accept throws. Sending needs a webcam."""
+        print(
+            f"[AirThrow] no camera on index {self.camera_index} — running in "
+            "RECEIVE-ONLY mode. This machine can accept throws but cannot send "
+            "(gestures need a webcam). Press Ctrl+C to quit."
+        )
+        try:
+            while True:
+                time.sleep(1)
+        except KeyboardInterrupt:
+            pass
 
     def _refresh_foreground_image(self):
         _, title = foreground_window()

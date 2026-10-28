@@ -24,6 +24,17 @@ def cmd_run(args):
     run(camera_index=args.camera)
 
 
+def cmd_selftest(args):
+    """Load the hand model and process one blank frame (no camera needed)."""
+    import numpy as np
+
+    from .gestures import SwipeDetector
+    det = SwipeDetector(on_swipe=lambda d: None)
+    frame, direction = det.process(np.zeros((480, 640, 3), dtype=np.uint8))
+    det.close()
+    print(f"OK: hand model loaded and processed a frame (direction={direction}).")
+
+
 def cmd_info(args):
     cfg = Config.load()
     print(f"AirThrow {__version__}")
@@ -83,6 +94,10 @@ def build_parser() -> argparse.ArgumentParser:
     r.set_defaults(func=cmd_run)
 
     sub.add_parser("info", help="show this device's name/IP/port").set_defaults(func=cmd_info)
+
+    sub.add_parser(
+        "selftest", help="load the hand model & process a frame (no camera)"
+    ).set_defaults(func=cmd_selftest)
 
     sn = sub.add_parser("set-name", help="set friendly device name")
     sn.add_argument("name")
