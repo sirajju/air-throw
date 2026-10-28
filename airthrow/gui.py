@@ -18,6 +18,7 @@ import tkinter as tk
 from tkinter import ttk
 
 from . import __version__, send_overlay
+from .send_overlay import STYLE_NAMES
 from .app import AirThrow, open_with_default_app
 from .config import RECEIVED_DIR, SLOTS, Config, local_ip
 from .logs import LOG_PATH, get_logger, setup_logging
@@ -58,6 +59,7 @@ class GUI:
         self.v_sens = tk.DoubleVar(value=self.config.swipe_min_distance)
         self.v_autoopen = tk.BooleanVar(value=self.config.auto_open)
         self.v_anim = tk.BooleanVar(value=self.config.show_send_animation)
+        self.v_style = tk.StringVar(value=self.config.send_animation_style)
         self.v_preview = tk.BooleanVar(value=False)
         self.v_camera = tk.IntVar(value=camera_index)
         self.v_peer = {
@@ -167,6 +169,16 @@ class GUI:
                         variable=self.v_anim,
                         command=self._save_settings).pack(anchor="w")
 
+        strow = ttk.Frame(beh, style="Card.TFrame"); strow.pack(fill="x", pady=(8, 0))
+        ttk.Label(strow, text="Border style", style="Card.TLabel", width=10).pack(side="left")
+        sb = ttk.Combobox(strow, textvariable=self.v_style, state="readonly",
+                          values=STYLE_NAMES, width=10)
+        sb.pack(side="left", padx=6)
+        sb.bind("<<ComboboxSelected>>",
+                lambda e: (self._save_settings(), self._test_border()))
+        ttk.Button(strow, text="Preview this style",
+                   command=self._test_border).pack(side="left", padx=6)
+
         camrow = ttk.Frame(beh, style="Card.TFrame"); camrow.pack(fill="x", pady=(8, 0))
         ttk.Label(camrow, text="Camera", style="Card.TLabel", width=10).pack(side="left")
         ttk.Spinbox(camrow, from_=0, to=8, width=5, textvariable=self.v_camera).pack(
@@ -237,6 +249,7 @@ class GUI:
         self.config.swipe_min_distance = round(self.v_sens.get(), 3)
         self.config.auto_open = self.v_autoopen.get()
         self.config.show_send_animation = self.v_anim.get()
+        self.config.send_animation_style = self.v_style.get()
         self.config.save()
         msg = "Settings saved"
         if self.running:
@@ -279,8 +292,9 @@ class GUI:
         threading.Thread(target=work, daemon=True).start()
 
     def _test_border(self):
-        send_overlay.flash(None)  # frame the whole screen as a preview
-        self._flash_status("Send border preview", ACCENT)
+        style = self.v_style.get()
+        send_overlay.flash(None, style=style)  # frame the whole screen as a preview
+        self._flash_status(f"Border preview: {style}", ACCENT)
 
     # ---- run control -------------------------------------------------
     def _toggle_run(self):

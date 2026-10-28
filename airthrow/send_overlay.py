@@ -33,29 +33,35 @@ DEFAULT_DURATION = 1.3  # seconds the border stays up
 FADE_SECONDS = 0.45     # of that, the trailing fade-out
 FRAME_MS = 33           # ~30 fps
 
-# Seamless gradient stops (teal -> blue -> violet -> pink -> teal). The last
-# stop equals the first so the scroll wraps without a visible seam.
-_STOPS = [
-    (0, 229, 200),    # teal
-    (33, 150, 243),   # blue
-    (124, 77, 255),   # violet
-    (255, 77, 157),   # pink
-    (0, 229, 200),    # back to teal
-]
+# Named border styles. Each is a list of RGB stops the gradient flows through;
+# the last stop equals the first so the scroll wraps without a visible seam.
+STYLES: dict[str, list[tuple[int, int, int]]] = {
+    "aurora": [(0, 229, 200), (33, 150, 243), (124, 77, 255), (255, 77, 157),
+               (0, 229, 200)],                       # teal -> blue -> violet -> pink
+    "rainbow": [(255, 40, 40), (255, 160, 0), (240, 230, 0), (40, 210, 90),
+                (0, 150, 255), (150, 50, 255), (255, 40, 40)],
+    "ocean": [(0, 180, 255), (0, 230, 200), (40, 120, 255), (0, 210, 230),
+              (0, 180, 255)],                         # cool cyans & blues
+    "sunset": [(255, 60, 0), (255, 150, 0), (255, 220, 70), (255, 70, 120),
+               (255, 60, 0)],                         # warm fire tones
+    "mono": [(0, 229, 200), (210, 255, 250), (0, 229, 200)],  # teal glow pulse
+}
+STYLE_NAMES = tuple(STYLES.keys())
+DEFAULT_STYLE = "aurora"
 
 
-def _build_gradient():
-    """A (PERIOD, 3) uint8 numpy array cycling smoothly through the stops."""
+def _build_gradient(stops):
+    """A (PERIOD, 3) uint8 numpy array cycling smoothly through ``stops``."""
     import numpy as np
 
-    seg = PERIOD / (len(_STOPS) - 1)
+    seg = PERIOD / (len(stops) - 1)
     out = np.zeros((PERIOD, 3), dtype=np.uint8)
     for i in range(PERIOD):
         pos = i / seg
         a = int(pos)
         f = pos - a
-        c0 = _STOPS[a]
-        c1 = _STOPS[min(a + 1, len(_STOPS) - 1)]
+        c0 = stops[a]
+        c1 = stops[min(a + 1, len(stops) - 1)]
         out[i] = [int(c0[k] + (c1[k] - c0[k]) * f) for k in range(3)]
     return out
 
@@ -66,7 +72,7 @@ class _Flash:
     def __init__(self, manager, root, gradient, rect, duration):
         self._mgr = manager
         self._root = root
-        self._grad = gradient
+        self._grad = gradient  # (PERIOD, 3) uint8 for the chosen style
         self._duration = duration
         self._start = time.time()
         self._strips = []  # (toplevel, label, orientation, length)
@@ -184,15 +190,23 @@ class _Manager:
         self._thread: threading.Thread | None = None
         self._lock = threading.Lock()
         self._root = None
-        self._gradient = None
+        self._grad_cache: dict[str, object] = {}  # style name -> gradient array
         self._active: set[_Flash] = set()
 
-    def flash(self, rect, duration: float = DEFAULT_DURATION) -> None:
+    def flash(self, rect, duration: float = DEFAULT_DURATION,
+              style: str | None = None) -> None:
         """Flash a gradient border around ``rect`` = (x, y, w, h), or the whole
-        screen if ``rect`` is None. Safe to call from any thread."""
+        screen if ``rect`` is None, in the named ``style`` (see STYLES). Safe to
+        call from any thread."""
         if not self._ensure_thread():
             return
-        self._q.put((rect, duration))
+        self._q.put((rect, duration, style or DEFAULT_STYLE))
+
+    def _gradient_for(self, style: str):
+        if style not in self._grad_cache:
+            stops = STYLES.get(style, STYLES[DEFAULT_STYLE])
+            self._grad_cache[style] = _build_gradient(stops)
+        return self._grad_cache[style]
 
     def _ensure_thread(self) -> bool:
         with self._lock:
@@ -212,7 +226,6 @@ class _Manager:
     def _run(self) -> None:
         try:
             import tkinter as tk
-            self._gradient = _build_gradient()
             self._root = tk.Tk()
             self._root.withdraw()  # the root itself is never shown
             self._poll()
@@ -223,9 +236,10 @@ class _Manager:
     def _poll(self) -> None:
         try:
             while True:
-                rect, duration = self._q.get_nowait()
+                rect, duration, style = self._q.get_nowait()
                 try:
-                    self._active.add(_Flash(self, self._root, self._gradient,
+                    gradient = self._gradient_for(style)
+                    self._active.add(_Flash(self, self._root, gradient,
                                             rect, duration))
                 except Exception as exc:
                     log.debug("could not show send border: %s", exc)
@@ -240,6 +254,7 @@ class _Manager:
 _manager = _Manager()
 
 
-def flash(rect, duration: float = DEFAULT_DURATION) -> None:
+def flash(rect, duration: float = DEFAULT_DURATION,
+          style: str | None = None) -> None:
     """Public entrypoint — see :meth:`_Manager.flash`."""
-    _manager.flash(rect, duration)
+    _manager.flash(rect, duration, style)

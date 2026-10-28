@@ -133,6 +133,20 @@ open image. Then:
    **opens automatically** in the default viewer (turn off with
    `set-auto-open off`). Turn the border off with `set-animation off`.
 
+**Preview the border without sending anything.** No second machine or open image
+needed — just watch it on screen:
+
+```bash
+python -m airthrow preview            # cycle through every style
+python -m airthrow preview ocean      # just one style
+python -m airthrow preview --window   # frame the focused window, not full screen
+python -m airthrow set-animation-style aurora   # pick your favourite
+```
+
+Styles: **aurora** (teal→blue→violet→pink), **rainbow**, **ocean**, **sunset**,
+**mono**. In the GUI, the **Border style** dropdown previews each as you select
+it, and **Preview this style** replays the current one.
+
 Press `q` or `Esc` to quit.
 
 ### Gestures
@@ -185,6 +199,8 @@ Autostart launches the windowed `airthrow-tray` so nothing pops up but the icon.
 | `set-sensitivity <d>` | Swipe travel needed to fire, 0.05 (easy) .. 0.9 (hard) |
 | `set-auto-open <on\|off>` | Auto-open received images in the default viewer |
 | `set-animation <on\|off>` | Gradient send border around the sent window on each throw |
+| `set-animation-style <name>` | Border style: aurora, rainbow, ocean, sunset, mono |
+| `preview [style] [--window]` | Simulate the send border (no image sent) to see the styles |
 | `set-resend-block <secs>` | Ignore same file→same peer repeats within N secs (0 = off) |
 | `camtest` | Probe camera indices and report which deliver frames |
 | `selftest` | Load the hand model and process a frame (no camera needed) |

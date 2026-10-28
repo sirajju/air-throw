@@ -48,6 +48,8 @@ class Config:
     gesture_mode: str = "two"
     # Flash an animated gradient border around the sent window on each throw.
     show_send_animation: bool = True
+    # Which border style to use (see send_overlay.STYLES): aurora/rainbow/...
+    send_animation_style: str = "aurora"
     # direction slot -> Peer (or missing if unassigned)
     peers: dict[str, Peer] = field(default_factory=dict)
 
@@ -72,6 +74,7 @@ class Config:
             resend_block_seconds=float(raw.get("resend_block_seconds", 10.0)),
             gesture_mode=raw.get("gesture_mode", "two"),
             show_send_animation=bool(raw.get("show_send_animation", True)),
+            send_animation_style=raw.get("send_animation_style", "aurora"),
             peers=peers,
         )
 
@@ -86,6 +89,7 @@ class Config:
             "resend_block_seconds": self.resend_block_seconds,
             "gesture_mode": self.gesture_mode,
             "show_send_animation": self.show_send_animation,
+            "send_animation_style": self.send_animation_style,
             "peers": {slot: asdict(peer) for slot, peer in self.peers.items()},
         }
         CONFIG_PATH.write_text(json.dumps(data, indent=2), encoding="utf-8")

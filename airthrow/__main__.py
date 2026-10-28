@@ -43,6 +43,41 @@ def cmd_set_animation(args):
           f"{'on' if cfg.show_send_animation else 'off'}")
 
 
+def cmd_set_animation_style(args):
+    from .send_overlay import STYLE_NAMES
+    cfg = Config.load()
+    cfg.send_animation_style = args.style
+    cfg.save()
+    print(f"Send animation style set to '{args.style}'. "
+          f"Preview any with:  airthrow preview")
+    print(f"Available styles: {', '.join(STYLE_NAMES)}")
+
+
+def cmd_preview(args):
+    """Simulate the send border with NO camera/peer/image — just watch it."""
+    import time
+
+    from . import send_overlay
+    from .foreground_image import foreground_rect
+
+    rect = None
+    if args.window:
+        rect = foreground_rect()  # frame whatever window is focused now
+
+    if args.style:
+        styles = [args.style]
+    else:
+        styles = list(send_overlay.STYLE_NAMES)  # cycle through all of them
+
+    print("Previewing send border (no image is sent). Watch your screen...")
+    for _ in range(max(1, args.loops)):
+        for name in styles:
+            print(f"  style: {name}")
+            send_overlay.flash(rect, duration=args.duration, style=name)
+            time.sleep(args.duration + 0.35)
+    print("Preview done. Pick one with:  airthrow set-animation-style <name>")
+
+
 def cmd_set_gesture(args):
     cfg = Config.load()
     cfg.gesture_mode = args.mode
@@ -238,6 +273,22 @@ def build_parser() -> argparse.ArgumentParser:
                         help="gradient send border on each throw (on/off)")
     an.add_argument("state", choices=("on", "off"))
     an.set_defaults(func=cmd_set_animation)
+
+    from .send_overlay import STYLE_NAMES
+    ast = sub.add_parser("set-animation-style",
+                         help=f"border style: {', '.join(STYLE_NAMES)}")
+    ast.add_argument("style", choices=STYLE_NAMES)
+    ast.set_defaults(func=cmd_set_animation_style)
+
+    pv = sub.add_parser("preview",
+                        help="simulate the send border (no image sent) to see the styles")
+    pv.add_argument("style", nargs="?", choices=STYLE_NAMES, default=None,
+                    help="one style to preview; omit to cycle through all")
+    pv.add_argument("--loops", type=int, default=1, help="times to repeat")
+    pv.add_argument("--duration", type=float, default=1.6, help="seconds per flash")
+    pv.add_argument("--window", action="store_true",
+                    help="frame the focused window instead of the whole screen")
+    pv.set_defaults(func=cmd_preview)
 
     rb = sub.add_parser("set-resend-block",
                         help="seconds to ignore same file->same peer repeats (0=off)")

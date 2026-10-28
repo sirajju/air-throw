@@ -166,7 +166,7 @@ class AirThrow:
                         (0, 220, 255), 10)
         if self.config.show_send_animation:
             try:
-                send_overlay.flash(rect)
+                send_overlay.flash(rect, style=self.config.send_animation_style)
             except Exception as exc:  # animation is cosmetic, never fatal
                 log.debug("send animation failed: %s", exc)
         threading.Thread(
