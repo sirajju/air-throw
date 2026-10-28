@@ -125,6 +125,7 @@ a swipe does nothing, check the `--debug` overlay: the progress bar must reach
 | `info` | Show this device's name, IP, port, settings and log path |
 | `set-sensitivity <d>` | Swipe travel needed to fire, 0.05 (easy) .. 0.9 (hard) |
 | `set-auto-open <on\|off>` | Auto-open received images in the default viewer |
+| `set-resend-block <secs>` | Ignore same file→same peer repeats within N secs (0 = off) |
 | `camtest` | Probe camera indices and report which deliver frames |
 | `selftest` | Load the hand model and process a frame (no camera needed) |
 | `logs [-n N]` | Print the tail of the log file |
@@ -187,7 +188,8 @@ Throwing the **same image to the same peer** again within ~10 seconds is
 skipped (the overlay shows "Already sent …"), so a double swipe or a hand
 lingering in frame won't spam the receiver. A **different image**, a
 **different peer**, or an **edited file** always sends. A failed send is not
-counted, so you can immediately retry.
+counted, so you can immediately retry. Change the window with
+`set-resend-block <secs>` (e.g. `set-resend-block 30`, or `0` to disable).
 
 ## Notes & limits (stage 1)
 

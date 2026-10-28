@@ -33,10 +33,6 @@ log = get_logger()
 
 WINDOW_NAME = "AirThrow"
 POLL_EVERY = 8  # frames between foreground-image checks (~3-4x/sec)
-# Block re-sending the *same* file to the *same* peer within this window, so a
-# double swipe (or a hand lingering in frame) doesn't spam the receiver. A
-# different file, a different peer, or a modified file is always allowed.
-REDUNDANT_SECONDS = 10.0
 
 
 def open_camera(index: int):
@@ -113,8 +109,9 @@ class AirThrow:
 
         # Redundant-send guard: same file to same peer within the window.
         now = time.time()
+        window = self.config.resend_block_seconds
         self._recent_sends = {k: v for k, v in self._recent_sends.items()
-                              if now - v < REDUNDANT_SECONDS}
+                              if now - v < window}
         try:
             mtime = image.stat().st_mtime
         except OSError:

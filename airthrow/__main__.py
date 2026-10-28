@@ -49,6 +49,7 @@ def cmd_info(args):
     print(f"  peers to add on OTHER machines: --ip {local_ip()} --port {cfg.listen_port}")
     print(f"  sensitivity : {cfg.swipe_min_distance:.2f} (swipe travel needed; lower = easier)")
     print(f"  auto-open   : {'on' if cfg.auto_open else 'off'} (open received images automatically)")
+    print(f"  resend-block: {cfg.resend_block_seconds:.0f}s (ignore same file->same peer repeats; 0 = off)")
     print(f"  log file    : {LOG_PATH}")
 
 
@@ -77,6 +78,19 @@ def cmd_set_sensitivity(args):
     cfg.save()
     print(f"Swipe sensitivity set to {args.distance:.2f} "
           f"(hand must travel {args.distance*100:.0f}% of frame width).")
+
+
+def cmd_set_resend_block(args):
+    if not 0 <= args.seconds <= 600:
+        sys.exit("seconds should be between 0 (off) and 600")
+    cfg = Config.load()
+    cfg.resend_block_seconds = args.seconds
+    cfg.save()
+    if args.seconds == 0:
+        print("Redundant-send guard disabled (every swipe sends).")
+    else:
+        print(f"Redundant-send window set to {args.seconds:.0f}s "
+              f"(same file -> same peer is skipped within this time).")
 
 
 def cmd_set_auto_open(args):
@@ -158,6 +172,11 @@ def build_parser() -> argparse.ArgumentParser:
                         help="open received images automatically (on/off)")
     ao.add_argument("state", choices=("on", "off"))
     ao.set_defaults(func=cmd_set_auto_open)
+
+    rb = sub.add_parser("set-resend-block",
+                        help="seconds to ignore same file->same peer repeats (0=off)")
+    rb.add_argument("seconds", type=float)
+    rb.set_defaults(func=cmd_set_resend_block)
 
     sub.add_parser("peers", help="list slot assignments").set_defaults(func=cmd_peers)
 
