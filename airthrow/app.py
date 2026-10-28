@@ -14,6 +14,9 @@ diagnostic overlay (hand status, palm position, live swipe-progress bar, FPS).
 
 from __future__ import annotations
 
+import os
+import subprocess
+import sys
 import threading
 import time
 from pathlib import Path
@@ -23,7 +26,7 @@ import cv2
 from . import transfer
 from .config import Config, local_ip
 from .foreground_image import current_image, foreground_window
-from .gestures import SWIPE_MIN_DISTANCE, SwipeDetector
+from .gestures import SwipeDetector
 from .logs import LOG_PATH, get_logger
 
 log = get_logger()
@@ -54,6 +57,8 @@ class AirThrow:
     # ---- events ------------------------------------------------------
     def on_received(self, sender: str, filename: str, path: Path):
         self.set_status(f"Received {filename} from {sender}", (0, 220, 0), 6)
+        if self.config.auto_open:
+            open_with_default_app(path)
 
     def on_swipe(self, direction: str):
         peer = self.config.peer_for(direction)
@@ -96,9 +101,12 @@ class AirThrow:
             self._run_receive_only()
             return
 
-        self.detector = SwipeDetector(on_swipe=self.on_swipe)
-        log.info("camera %d open; swipe left/right to throw. Press q/ESC to quit.",
-                 self.camera_index)
+        self.detector = SwipeDetector(
+            on_swipe=self.on_swipe, min_distance=self.config.swipe_min_distance
+        )
+        log.info("camera %d open; swipe sensitivity=%.2f; swipe left/right to "
+                 "throw. Press q/ESC to quit.",
+                 self.camera_index, self.config.swipe_min_distance)
         frame_no = 0
         try:
             while True:
@@ -203,7 +211,8 @@ class AirThrow:
 
         # Swipe-progress bar: |cur_dx| vs the threshold needed to fire.
         bar_x, bar_y, bar_w = 10, 110, w - 20
-        progress = min(abs(cur_dx) / SWIPE_MIN_DISTANCE, 1.0) if cur_dx else 0.0
+        threshold = self.config.swipe_min_distance
+        progress = min(abs(cur_dx) / threshold, 1.0) if cur_dx else 0.0
         fired = progress >= 1.0
         cv2.rectangle(frame, (bar_x, bar_y), (bar_x + bar_w, bar_y + 14), (70, 70, 70), 1)
         cv2.rectangle(frame, (bar_x, bar_y),
@@ -212,6 +221,20 @@ class AirThrow:
         arrow = "" if not cur_dx else ("-> right" if cur_dx > 0 else "<- left")
         cv2.putText(frame, f"swipe {progress*100:3.0f}%  dx={cur_dx:+.2f} {arrow}",
                     (bar_x, bar_y + 32), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1)
+
+
+def open_with_default_app(path: Path) -> None:
+    """Open a file in the OS default application (Windows + Linux + macOS)."""
+    try:
+        if sys.platform.startswith("win"):
+            os.startfile(str(path))  # type: ignore[attr-defined]
+        elif sys.platform.startswith("darwin"):
+            subprocess.Popen(["open", str(path)])
+        else:
+            subprocess.Popen(["xdg-open", str(path)])
+        log.info("opened %s", path)
+    except Exception as exc:  # a failed open must never crash the receiver
+        log.warning("could not auto-open %s: %s", path, exc)
 
 
 def run(camera_index: int = 0, debug: bool = False):

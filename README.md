@@ -107,16 +107,24 @@ open image. Then:
 1. Open an image in any viewer (Photos, your browser, IrfanView, `eog`, …).
 2. Swipe your hand **left** or **right** in front of the camera.
 3. The open image flies to that direction's peer and lands in its
-   `~/.airthrow/Received` folder.
+   `~/.airthrow/Received` folder — and **opens automatically** in the default
+   viewer on the receiving machine (turn off with `set-auto-open off`).
 
 Press `q` or `Esc` to quit.
+
+**Which way?** The view is mirrored, so swiping your hand **to your right**
+sends to the **right** peer and **to your left** sends to the **left** peer. If
+a swipe does nothing, check the `--debug` overlay: the progress bar must reach
+100%. Too hard to trigger? Lower it, e.g. `set-sensitivity 0.18`.
 
 ## Commands
 
 | Command | What it does |
 |---|---|
 | `run [--camera N] [--debug]` | Start camera + gestures + receiver (receive-only if no camera) |
-| `info` | Show this device's name, IP, port and log path |
+| `info` | Show this device's name, IP, port, settings and log path |
+| `set-sensitivity <d>` | Swipe travel needed to fire, 0.05 (easy) .. 0.9 (hard) |
+| `set-auto-open <on\|off>` | Auto-open received images in the default viewer |
 | `selftest` | Load the hand model and process a frame (no camera needed) |
 | `logs [-n N]` | Print the tail of the log file |
 | `set-name <name>` | Set the name peers see |

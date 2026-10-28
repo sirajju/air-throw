@@ -24,6 +24,20 @@ from . import IMAGE_EXTENSIONS
 IS_WINDOWS = sys.platform.startswith("win")
 IS_LINUX = sys.platform.startswith("linux")
 
+# Images under these paths are app chrome/decoration (e.g. WinUI's
+# NoiseAsset_256x256_PNG), never a user's photo — ignore them. Markers are
+# written with forward slashes; the path is normalised before matching so this
+# works on both Windows (\) and Linux (/).
+_SYSTEM_MARKERS = (
+    "/windows/", "/program files", "windowsapps", "/appdata/local/packages/",
+    "/usr/share/", "/usr/lib/", "/snap/", "site-packages", "dist-packages",
+)
+
+
+def _is_system_asset(path: Path) -> bool:
+    p = str(path).lower().replace("\\", "/")
+    return any(marker in p for marker in _SYSTEM_MARKERS)
+
 
 # --------------------------------------------------------------------------
 # Foreground window -> (pid, title)
@@ -90,7 +104,9 @@ def _open_image_of_pid(pid: int) -> Path | None:
         try:
             for of in proc.open_files():
                 p = Path(of.path)
-                if p.suffix.lower() in IMAGE_EXTENSIONS and p.exists():
+                if (p.suffix.lower() in IMAGE_EXTENSIONS
+                        and not _is_system_asset(p)
+                        and p.exists()):
                     candidates.append(p)
         except (psutil.NoSuchProcess, psutil.AccessDenied):
             continue

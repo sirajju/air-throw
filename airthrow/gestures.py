@@ -27,7 +27,9 @@ from .logs import get_logger
 log = get_logger()
 
 # Tunables — these feel right for a webcam at arm's length; adjust to taste.
-SWIPE_MIN_DISTANCE = 0.33   # fraction of frame width the palm must travel
+# SWIPE_MIN_DISTANCE is the default; it can be overridden per-device via config
+# (set-sensitivity) and passed into SwipeDetector.
+SWIPE_MIN_DISTANCE = 0.22   # fraction of frame width the palm must travel
 SWIPE_MAX_DURATION = 0.6    # seconds; the travel must happen at least this fast
 HISTORY_SECONDS = 0.8       # how much motion history to keep
 COOLDOWN_SECONDS = 1.5      # ignore new swipes for this long after one fires
@@ -50,8 +52,10 @@ class _Sample:
 
 
 class SwipeDetector:
-    def __init__(self, on_swipe: Callable[[str], None]):
+    def __init__(self, on_swipe: Callable[[str], None],
+                 min_distance: float = SWIPE_MIN_DISTANCE):
         self.on_swipe = on_swipe
+        self.min_distance = min_distance
         self.history: deque[_Sample] = deque()
         self.last_fire = 0.0
         self._start = time.time()
@@ -129,7 +133,7 @@ class SwipeDetector:
 
         in_cooldown = now - self.last_fire < COOLDOWN_SECONDS
         if (not in_cooldown
-                and abs(dx) >= SWIPE_MIN_DISTANCE
+                and abs(dx) >= self.min_distance
                 and 0 < dt <= SWIPE_MAX_DURATION):
             direction = "right" if dx > 0 else "left"
             self.last_fire = now
@@ -140,9 +144,9 @@ class SwipeDetector:
 
         # Near-miss diagnostics: a fast-enough swipe that fell just short.
         if (not in_cooldown and 0 < dt <= SWIPE_MAX_DURATION
-                and abs(dx) >= SWIPE_MIN_DISTANCE * 0.6):
+                and abs(dx) >= self.min_distance * 0.6):
             log.debug("near-miss dx=%+.2f (need %.2f) dt=%.0fms",
-                      dx, SWIPE_MIN_DISTANCE, dt * 1000)
+                      dx, self.min_distance, dt * 1000)
         return None
 
 

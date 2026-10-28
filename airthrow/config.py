@@ -36,6 +36,11 @@ class Config:
     device_name: str = field(default_factory=socket.gethostname)
     # Port our own receiver listens on.
     listen_port: int = DEFAULT_PORT
+    # How far the hand must travel (fraction of frame width) to count as a
+    # swipe. Lower = easier to trigger. Tunable with `set-sensitivity`.
+    swipe_min_distance: float = 0.22
+    # Open a received image in the default viewer as soon as it arrives.
+    auto_open: bool = True
     # direction slot -> Peer (or missing if unassigned)
     peers: dict[str, Peer] = field(default_factory=dict)
 
@@ -55,6 +60,8 @@ class Config:
         return cls(
             device_name=raw.get("device_name", socket.gethostname()),
             listen_port=raw.get("listen_port", DEFAULT_PORT),
+            swipe_min_distance=float(raw.get("swipe_min_distance", 0.22)),
+            auto_open=bool(raw.get("auto_open", True)),
             peers=peers,
         )
 
@@ -64,6 +71,8 @@ class Config:
         data = {
             "device_name": self.device_name,
             "listen_port": self.listen_port,
+            "swipe_min_distance": self.swipe_min_distance,
+            "auto_open": self.auto_open,
             "peers": {slot: asdict(peer) for slot, peer in self.peers.items()},
         }
         CONFIG_PATH.write_text(json.dumps(data, indent=2), encoding="utf-8")

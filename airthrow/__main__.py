@@ -42,6 +42,8 @@ def cmd_info(args):
     print(f"  device name : {cfg.device_name}")
     print(f"  LAN address : {local_ip()}:{cfg.listen_port}")
     print(f"  peers to add on OTHER machines: --ip {local_ip()} --port {cfg.listen_port}")
+    print(f"  sensitivity : {cfg.swipe_min_distance:.2f} (swipe travel needed; lower = easier)")
+    print(f"  auto-open   : {'on' if cfg.auto_open else 'off'} (open received images automatically)")
     print(f"  log file    : {LOG_PATH}")
 
 
@@ -60,6 +62,23 @@ def cmd_set_name(args):
     cfg.device_name = args.name
     cfg.save()
     print(f"Device name set to {args.name!r}")
+
+
+def cmd_set_sensitivity(args):
+    if not 0.05 <= args.distance <= 0.9:
+        sys.exit("distance should be between 0.05 (very easy) and 0.9 (very hard)")
+    cfg = Config.load()
+    cfg.swipe_min_distance = args.distance
+    cfg.save()
+    print(f"Swipe sensitivity set to {args.distance:.2f} "
+          f"(hand must travel {args.distance*100:.0f}% of frame width).")
+
+
+def cmd_set_auto_open(args):
+    cfg = Config.load()
+    cfg.auto_open = args.state == "on"
+    cfg.save()
+    print(f"Auto-open received images: {'on' if cfg.auto_open else 'off'}")
 
 
 def cmd_peers(args):
@@ -120,6 +139,16 @@ def build_parser() -> argparse.ArgumentParser:
     sn = sub.add_parser("set-name", help="set friendly device name")
     sn.add_argument("name")
     sn.set_defaults(func=cmd_set_name)
+
+    ss = sub.add_parser("set-sensitivity",
+                        help="swipe travel needed (0.05 easy .. 0.9 hard)")
+    ss.add_argument("distance", type=float)
+    ss.set_defaults(func=cmd_set_sensitivity)
+
+    ao = sub.add_parser("set-auto-open",
+                        help="open received images automatically (on/off)")
+    ao.add_argument("state", choices=("on", "off"))
+    ao.set_defaults(func=cmd_set_auto_open)
 
     sub.add_parser("peers", help="list slot assignments").set_defaults(func=cmd_peers)
 
