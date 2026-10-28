@@ -22,6 +22,9 @@ from mediapipe.tasks import python as mp_python
 from mediapipe.tasks.python import vision
 
 from . import asset_path
+from .logs import get_logger
+
+log = get_logger()
 
 # Tunables — these feel right for a webcam at arm's length; adjust to taste.
 SWIPE_MIN_DISTANCE = 0.33   # fraction of frame width the palm must travel
@@ -53,6 +56,12 @@ class SwipeDetector:
         self.last_fire = 0.0
         self._start = time.time()
         self._last_ts = -1  # ms; detect_for_video needs strictly-increasing ts
+
+        # Live telemetry for the debug overlay / logs (updated each frame).
+        self.hand_present = False
+        self.palm_x: float | None = None
+        self.cur_dx = 0.0   # signed travel across the current history window
+        self.cur_dt = 0.0   # seconds spanned by that window
 
         options = vision.HandLandmarkerOptions(
             base_options=mp_python.BaseOptions(
@@ -90,9 +99,15 @@ class SwipeDetector:
             _draw_hand(frame_bgr, landmarks)
             # Landmark 9 = base of middle finger ≈ palm centre.
             palm_x = landmarks[9].x
+            self.hand_present = True
+            self.palm_x = palm_x
             self.history.append(_Sample(now, palm_x))
             direction = self._detect(now)
         else:
+            self.hand_present = False
+            self.palm_x = None
+            self.cur_dx = 0.0
+            self.cur_dt = 0.0
             self.history.clear()
 
         return frame_bgr, direction
@@ -102,19 +117,32 @@ class SwipeDetector:
         while self.history and now - self.history[0].t > HISTORY_SECONDS:
             self.history.popleft()
         if len(self.history) < 3:
-            return None
-        if now - self.last_fire < COOLDOWN_SECONDS:
+            self.cur_dx = 0.0
+            self.cur_dt = 0.0
             return None
 
         start, end = self.history[0], self.history[-1]
         dx = end.x - start.x
         dt = end.t - start.t
-        if abs(dx) >= SWIPE_MIN_DISTANCE and 0 < dt <= SWIPE_MAX_DURATION:
+        self.cur_dx = dx  # exposed for the overlay/log every frame
+        self.cur_dt = dt
+
+        in_cooldown = now - self.last_fire < COOLDOWN_SECONDS
+        if (not in_cooldown
+                and abs(dx) >= SWIPE_MIN_DISTANCE
+                and 0 < dt <= SWIPE_MAX_DURATION):
             direction = "right" if dx > 0 else "left"
             self.last_fire = now
             self.history.clear()
+            log.info("SWIPE %s (dx=%+.2f over %.0fms)", direction, dx, dt * 1000)
             self.on_swipe(direction)
             return direction
+
+        # Near-miss diagnostics: a fast-enough swipe that fell just short.
+        if (not in_cooldown and 0 < dt <= SWIPE_MAX_DURATION
+                and abs(dx) >= SWIPE_MIN_DISTANCE * 0.6):
+            log.debug("near-miss dx=%+.2f (need %.2f) dt=%.0fms",
+                      dx, SWIPE_MIN_DISTANCE, dt * 1000)
         return None
 
 

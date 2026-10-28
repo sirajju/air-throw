@@ -16,6 +16,9 @@ import uvicorn
 from fastapi import FastAPI, File, Form, UploadFile
 
 from .config import RECEIVED_DIR, Config
+from .logs import get_logger
+
+log = get_logger()
 
 # How a received file is announced. app.py can override this to drive the UI.
 on_received = None  # callable(sender: str, filename: str, path: Path) | None
@@ -39,7 +42,8 @@ def build_app(config: Config) -> FastAPI:
                 on_received(sender, dest.name, dest)
             except Exception:  # UI callback must never crash the receiver
                 pass
-        print(f"[AirThrow] received {dest.name} ({len(data)} bytes) from {sender}")
+        log.info("RECEIVED %s (%d bytes) from %s -> %s",
+                 dest.name, len(data), sender, dest)
         return {"ok": True, "saved_as": dest.name, "bytes": len(data)}
 
     return api

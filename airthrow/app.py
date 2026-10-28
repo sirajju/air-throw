@@ -7,6 +7,9 @@ Run loop:
     (ignoring AirThrow's own preview window)
   * a detected swipe grabs that remembered image and POSTs it to the peer
     assigned to that direction, on a worker thread so the camera never stalls
+
+Pass debug=True (CLI: `run --debug`) for verbose console logs and an on-screen
+diagnostic overlay (hand status, palm position, live swipe-progress bar, FPS).
 """
 
 from __future__ import annotations
@@ -20,20 +23,27 @@ import cv2
 from . import transfer
 from .config import Config, local_ip
 from .foreground_image import current_image, foreground_window
-from .gestures import SwipeDetector
+from .gestures import SWIPE_MIN_DISTANCE, SwipeDetector
+from .logs import LOG_PATH, get_logger
+
+log = get_logger()
 
 WINDOW_NAME = "AirThrow"
 POLL_EVERY = 8  # frames between foreground-image checks (~3-4x/sec)
 
 
 class AirThrow:
-    def __init__(self, config: Config, camera_index: int = 0):
+    def __init__(self, config: Config, camera_index: int = 0, debug: bool = False):
         self.config = config
         self.camera_index = camera_index
+        self.debug = debug
         self.last_image: Path | None = None
         self.status = "Ready"
         self.status_color = (255, 255, 255)
         self.status_until = 0.0
+        self.detector: SwipeDetector | None = None
+        self._fps = 0.0
+        self._last_frame_t = 0.0
 
     # ---- status helpers ---------------------------------------------
     def set_status(self, text: str, color=(255, 255, 255), seconds: float = 4.0):
@@ -49,12 +59,15 @@ class AirThrow:
         peer = self.config.peer_for(direction)
         arrow = "<<" if direction == "left" else ">>"
         if not peer:
+            log.warning("swipe %s but no peer in '%s' slot", direction, direction)
             self.set_status(f"{arrow} No peer in '{direction}' slot", (0, 180, 255))
             return
         if not self.last_image:
+            log.warning("swipe %s to %s but no image open to throw", direction, peer.name)
             self.set_status(f"{arrow} No image open to throw", (0, 180, 255))
             return
         image = self.last_image
+        log.info("throwing %s -> %s (%s)", image.name, peer.name, peer.url())
         self.set_status(f"{arrow} Throwing {image.name} to {peer.name}...", (0, 220, 255), 10)
         threading.Thread(
             target=self._send_worker, args=(peer, image), daemon=True
@@ -62,17 +75,20 @@ class AirThrow:
 
     def _send_worker(self, peer, image: Path):
         try:
-            transfer.send_file(peer.url(), image, self.config.device_name)
+            result = transfer.send_file(peer.url(), image, self.config.device_name)
+            log.info("SENT %s -> %s (%s)", image.name, peer.name, result)
             self.set_status(f"Sent {image.name} -> {peer.name}", (0, 220, 0), 6)
         except Exception as exc:  # network/file errors shown, not fatal
+            log.error("send failed %s -> %s: %s", image.name, peer.name, exc)
             self.set_status(f"Failed -> {peer.name}: {exc}", (0, 0, 255), 8)
 
     # ---- main loop ---------------------------------------------------
     def run(self):
         transfer.on_received = self.on_received
         transfer.start_receiver(self.config)
-        print(f"[AirThrow] receiving on {local_ip()}:{self.config.listen_port} "
-              f"as '{self.config.device_name}'")
+        log.info("receiving on %s:%d as '%s'",
+                 local_ip(), self.config.listen_port, self.config.device_name)
+        log.info("log file: %s", LOG_PATH)
 
         cap = cv2.VideoCapture(self.camera_index)
         if not cap.isOpened():
@@ -80,7 +96,9 @@ class AirThrow:
             self._run_receive_only()
             return
 
-        detector = SwipeDetector(on_swipe=self.on_swipe)
+        self.detector = SwipeDetector(on_swipe=self.on_swipe)
+        log.info("camera %d open; swipe left/right to throw. Press q/ESC to quit.",
+                 self.camera_index)
         frame_no = 0
         try:
             while True:
@@ -88,13 +106,14 @@ class AirThrow:
                 if not ok:
                     continue
                 frame = cv2.flip(frame, 1)  # mirror: feels natural
+                self._update_fps()
 
                 # Remember the foreground image a few times per second.
                 frame_no += 1
                 if frame_no % POLL_EVERY == 0:
                     self._refresh_foreground_image()
 
-                frame, _ = detector.process(frame)
+                frame, _ = self.detector.process(frame)
                 self._draw_overlay(frame)
                 cv2.imshow(WINDOW_NAME, frame)
 
@@ -102,17 +121,18 @@ class AirThrow:
                 if key in (27, ord("q")):  # ESC or q
                     break
         finally:
-            detector.close()
+            self.detector.close()
             cap.release()
             cv2.destroyAllWindows()
+            log.info("stopped")
 
     def _run_receive_only(self):
         """No usable camera: stay alive as a receiver so this machine can still
         accept throws. Sending needs a webcam."""
-        print(
-            f"[AirThrow] no camera on index {self.camera_index} — running in "
-            "RECEIVE-ONLY mode. This machine can accept throws but cannot send "
-            "(gestures need a webcam). Press Ctrl+C to quit."
+        log.warning(
+            "no camera on index %d — RECEIVE-ONLY mode. This machine can accept "
+            "throws but cannot send (gestures need a webcam). Ctrl+C to quit.",
+            self.camera_index,
         )
         try:
             while True:
@@ -120,12 +140,22 @@ class AirThrow:
         except KeyboardInterrupt:
             pass
 
+    def _update_fps(self):
+        now = time.time()
+        if self._last_frame_t:
+            dt = now - self._last_frame_t
+            if dt > 0:
+                # Exponential smoothing so the number doesn't jitter.
+                self._fps = 0.9 * self._fps + 0.1 * (1.0 / dt)
+        self._last_frame_t = now
+
     def _refresh_foreground_image(self):
         _, title = foreground_window()
         if WINDOW_NAME.lower() in (title or "").lower():
             return  # our own preview window; keep whatever we last saw
         img = current_image()
-        if img:
+        if img and img != self.last_image:
+            log.debug("foreground image -> %s", img)
             self.last_image = img
 
     # ---- overlay -----------------------------------------------------
@@ -148,6 +178,41 @@ class AirThrow:
             cv2.putText(frame, self.status, (10, h - 15),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.6, self.status_color, 2)
 
+        if self.debug:
+            self._draw_debug(frame)
 
-def run(camera_index: int = 0):
-    AirThrow(Config.load(), camera_index=camera_index).run()
+    def _draw_debug(self, frame):
+        """Diagnostic overlay: hand status, palm marker, and a live progress bar
+        showing how close the current motion is to firing a swipe."""
+        h, w = frame.shape[:2]
+        det = self.detector
+        hand = det.hand_present if det else False
+        palm_x = det.palm_x if det else None
+        cur_dx = det.cur_dx if det else 0.0
+
+        cv2.putText(frame, f"FPS {self._fps:4.1f}  Hand {'YES' if hand else 'no '}",
+                    (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.6,
+                    (0, 220, 0) if hand else (0, 0, 220), 2)
+
+        # Palm position marker along a horizontal track.
+        track_y = 85
+        cv2.line(frame, (10, track_y), (w - 10, track_y), (90, 90, 90), 1)
+        if palm_x is not None:
+            px = int(10 + palm_x * (w - 20))
+            cv2.circle(frame, (px, track_y), 6, (0, 220, 255), -1)
+
+        # Swipe-progress bar: |cur_dx| vs the threshold needed to fire.
+        bar_x, bar_y, bar_w = 10, 110, w - 20
+        progress = min(abs(cur_dx) / SWIPE_MIN_DISTANCE, 1.0) if cur_dx else 0.0
+        fired = progress >= 1.0
+        cv2.rectangle(frame, (bar_x, bar_y), (bar_x + bar_w, bar_y + 14), (70, 70, 70), 1)
+        cv2.rectangle(frame, (bar_x, bar_y),
+                      (bar_x + int(bar_w * progress), bar_y + 14),
+                      (0, 220, 0) if fired else (0, 170, 220), -1)
+        arrow = "" if not cur_dx else ("-> right" if cur_dx > 0 else "<- left")
+        cv2.putText(frame, f"swipe {progress*100:3.0f}%  dx={cur_dx:+.2f} {arrow}",
+                    (bar_x, bar_y + 32), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1)
+
+
+def run(camera_index: int = 0, debug: bool = False):
+    AirThrow(Config.load(), camera_index=camera_index, debug=debug).run()

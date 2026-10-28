@@ -17,11 +17,12 @@ import sys
 
 from . import DEFAULT_PORT, __version__
 from .config import SLOTS, Config, local_ip
+from .logs import LOG_PATH, setup_logging
 
 
 def cmd_run(args):
     from .app import run  # imported lazily so config commands don't need cv2
-    run(camera_index=args.camera)
+    run(camera_index=args.camera, debug=args.debug)
 
 
 def cmd_selftest(args):
@@ -41,6 +42,17 @@ def cmd_info(args):
     print(f"  device name : {cfg.device_name}")
     print(f"  LAN address : {local_ip()}:{cfg.listen_port}")
     print(f"  peers to add on OTHER machines: --ip {local_ip()} --port {cfg.listen_port}")
+    print(f"  log file    : {LOG_PATH}")
+
+
+def cmd_logs(args):
+    if not LOG_PATH.exists():
+        print(f"No log yet at {LOG_PATH} (run AirThrow first).")
+        return
+    lines = LOG_PATH.read_text(encoding="utf-8", errors="replace").splitlines()
+    print(f"# {LOG_PATH}  (last {min(args.lines, len(lines))} of {len(lines)} lines)")
+    for line in lines[-args.lines:]:
+        print(line)
 
 
 def cmd_set_name(args):
@@ -91,6 +103,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     r = sub.add_parser("run", help="start camera + gestures + receiver")
     r.add_argument("--camera", type=int, default=0, help="camera index (default 0)")
+    r.add_argument("--debug", action="store_true",
+                   help="verbose logs + on-screen diagnostic overlay")
     r.set_defaults(func=cmd_run)
 
     sub.add_parser("info", help="show this device's name/IP/port").set_defaults(func=cmd_info)
@@ -98,6 +112,10 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser(
         "selftest", help="load the hand model & process a frame (no camera)"
     ).set_defaults(func=cmd_selftest)
+
+    lg = sub.add_parser("logs", help="show the tail of the log file")
+    lg.add_argument("-n", "--lines", type=int, default=40, help="lines to show")
+    lg.set_defaults(func=cmd_logs)
 
     sn = sub.add_parser("set-name", help="set friendly device name")
     sn.add_argument("name")
@@ -125,6 +143,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv=None):
     args = build_parser().parse_args(argv)
+    setup_logging(debug=getattr(args, "debug", False))
     args.func(args)
 
 

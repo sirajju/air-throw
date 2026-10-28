@@ -115,9 +115,10 @@ Press `q` or `Esc` to quit.
 
 | Command | What it does |
 |---|---|
-| `run [--camera N]` | Start camera + gestures + receiver (receive-only if no camera) |
-| `info` | Show this device's name, IP and port |
+| `run [--camera N] [--debug]` | Start camera + gestures + receiver (receive-only if no camera) |
+| `info` | Show this device's name, IP, port and log path |
 | `selftest` | Load the hand model and process a frame (no camera needed) |
+| `logs [-n N]` | Print the tail of the log file |
 | `set-name <name>` | Set the name peers see |
 | `peers` | List left/right assignments |
 | `set-peer <slot> <name> <ip> [port]` | Assign a peer to a direction |
@@ -132,6 +133,31 @@ If swipes fire too easily or not enough, edit the constants at the top of
 - `SWIPE_MIN_DISTANCE` — how far the hand must travel (fraction of frame width)
 - `SWIPE_MAX_DURATION` — how fast that travel must be
 - `COOLDOWN_SECONDS` — minimum gap between throws
+
+## Debugging
+
+Run with `--debug` for a verbose console and an on-screen diagnostic overlay:
+
+```bash
+python -m airthrow run --debug      # or:  airthrow run --debug
+```
+
+The overlay adds:
+- **FPS** and **Hand YES/no** — is a hand being detected at all?
+- a **palm marker** sliding along a horizontal track (your hand's position)
+- a **swipe-progress bar** — how close the current motion is to the threshold
+  that fires a throw (fills green at 100%), plus the live `dx` and direction
+
+Everything is also written to a log file (full detail, always):
+
+```
+~/.airthrow/airthrow.log
+```
+
+View it any time with `airthrow logs` (e.g. `airthrow logs -n 100`). Logged
+events include every swipe (`SWIPE right (dx=+0.41 over 280ms)`), near-misses,
+sends, receives, and errors. When something misbehaves, that file is the first
+thing to check — and the easiest thing to send over for help.
 
 ## Notes & limits (stage 1)
 
