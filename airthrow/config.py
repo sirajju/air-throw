@@ -46,6 +46,8 @@ class Config:
     # Gesture mode: "two" (two-finger swipe), "grab" (fist pick-and-throw),
     # or "swipe" (whole-hand flick).
     gesture_mode: str = "two"
+    # Flash an animated gradient border around the sent window on each throw.
+    show_send_animation: bool = True
     # direction slot -> Peer (or missing if unassigned)
     peers: dict[str, Peer] = field(default_factory=dict)
 
@@ -69,6 +71,7 @@ class Config:
             auto_open=bool(raw.get("auto_open", True)),
             resend_block_seconds=float(raw.get("resend_block_seconds", 10.0)),
             gesture_mode=raw.get("gesture_mode", "two"),
+            show_send_animation=bool(raw.get("show_send_animation", True)),
             peers=peers,
         )
 
@@ -82,6 +85,7 @@ class Config:
             "auto_open": self.auto_open,
             "resend_block_seconds": self.resend_block_seconds,
             "gesture_mode": self.gesture_mode,
+            "show_send_animation": self.show_send_animation,
             "peers": {slot: asdict(peer) for slot, peer in self.peers.items()},
         }
         CONFIG_PATH.write_text(json.dumps(data, indent=2), encoding="utf-8")

@@ -69,23 +69,71 @@ def _foreground_windows() -> tuple[int | None, str]:
 
 
 def _foreground_linux() -> tuple[int | None, str]:
-    import subprocess
-
-    def run(cmd: list[str]) -> str:
-        try:
-            return subprocess.run(
-                cmd, capture_output=True, text=True, timeout=2
-            ).stdout.strip()
-        except (OSError, subprocess.SubprocessError):
-            return ""
-
-    win_id = run(["xdotool", "getactivewindow"])
+    win_id = _xdotool("getactivewindow")
     if not win_id:
         return (None, "")
-    title = run(["xdotool", "getwindowname", win_id])
-    pid_str = run(["xdotool", "getwindowpid", win_id])
+    title = _xdotool("getwindowname", win_id)
+    pid_str = _xdotool("getwindowpid", win_id)
     pid = int(pid_str) if pid_str.isdigit() else None
     return (pid, title)
+
+
+def _xdotool(*args: str) -> str:
+    import subprocess
+
+    try:
+        return subprocess.run(
+            ["xdotool", *args], capture_output=True, text=True, timeout=2
+        ).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        return ""
+
+
+# --------------------------------------------------------------------------
+# Foreground window -> on-screen rectangle (x, y, w, h), for the send animation
+# --------------------------------------------------------------------------
+def foreground_rect() -> tuple[int, int, int, int] | None:
+    """Screen rectangle of the active window, or None if it can't be read."""
+    if IS_WINDOWS:
+        return _foreground_rect_windows()
+    if IS_LINUX:
+        return _foreground_rect_linux()
+    return None
+
+
+def _foreground_rect_windows() -> tuple[int, int, int, int] | None:
+    try:
+        import win32gui
+    except ImportError:
+        return None
+    hwnd = win32gui.GetForegroundWindow()
+    if not hwnd:
+        return None
+    try:
+        left, top, right, bottom = win32gui.GetWindowRect(hwnd)
+    except Exception:
+        return None
+    w, h = right - left, bottom - top
+    if w <= 0 or h <= 0:
+        return None
+    return (left, top, w, h)
+
+
+def _foreground_rect_linux() -> tuple[int, int, int, int] | None:
+    win_id = _xdotool("getactivewindow")
+    if not win_id:
+        return None
+    out = _xdotool("getwindowgeometry", "--shell", win_id)
+    vals: dict[str, int] = {}
+    for line in out.splitlines():
+        if "=" in line:
+            key, _, val = line.partition("=")
+            if val.strip().lstrip("-").isdigit():
+                vals[key.strip()] = int(val.strip())
+    try:
+        return (vals["X"], vals["Y"], vals["WIDTH"], vals["HEIGHT"])
+    except KeyError:
+        return None
 
 
 # --------------------------------------------------------------------------

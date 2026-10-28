@@ -30,6 +30,19 @@ def cmd_tray(args):
     run_tray(camera_index=args.camera)
 
 
+def cmd_gui(args):
+    from .gui import run_gui
+    run_gui(camera_index=args.camera)
+
+
+def cmd_set_animation(args):
+    cfg = Config.load()
+    cfg.show_send_animation = args.state == "on"
+    cfg.save()
+    print(f"Send animation (gradient border): "
+          f"{'on' if cfg.show_send_animation else 'off'}")
+
+
 def cmd_set_gesture(args):
     cfg = Config.load()
     cfg.gesture_mode = args.mode
@@ -181,6 +194,10 @@ def build_parser() -> argparse.ArgumentParser:
     tr.add_argument("--camera", type=int, default=0, help="camera index (default 0)")
     tr.set_defaults(func=cmd_tray)
 
+    g = sub.add_parser("gui", help="open the desktop control-panel window")
+    g.add_argument("--camera", type=int, default=0, help="camera index (default 0)")
+    g.set_defaults(func=cmd_gui)
+
     sg = sub.add_parser("set-gesture", help="choose gesture: two, grab or swipe")
     sg.add_argument("mode", choices=("two", "grab", "swipe"))
     sg.set_defaults(func=cmd_set_gesture)
@@ -216,6 +233,11 @@ def build_parser() -> argparse.ArgumentParser:
                         help="open received images automatically (on/off)")
     ao.add_argument("state", choices=("on", "off"))
     ao.set_defaults(func=cmd_set_auto_open)
+
+    an = sub.add_parser("set-animation",
+                        help="gradient send border on each throw (on/off)")
+    an.add_argument("state", choices=("on", "off"))
+    an.set_defaults(func=cmd_set_animation)
 
     rb = sub.add_parser("set-resend-block",
                         help="seconds to ignore same file->same peer repeats (0=off)")

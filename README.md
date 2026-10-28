@@ -30,15 +30,16 @@ Two ways to run AirThrow: a **standalone executable** (no Python needed) or
 Build a single-file executable for your OS (PyInstaller cannot cross-compile, so
 each binary is built on its own OS):
 
-Each build produces **two** executables: `airthrow` (console CLI) and
-`airthrow-tray` (windowed, no console — the background tray app).
+Each build produces **three** executables: `airthrow` (console CLI),
+`airthrow-gui` (windowed desktop control panel) and `airthrow-tray` (windowed,
+no console — the background tray app).
 
-**Windows** → `dist\airthrow.exe` + `dist\airthrow-tray.exe`
+**Windows** → `dist\airthrow.exe` + `dist\airthrow-gui.exe` + `dist\airthrow-tray.exe`
 ```powershell
 powershell -ExecutionPolicy Bypass -File build.ps1
 ```
 
-**Linux** → `dist/airthrow` + `dist/airthrow-tray` (run on a Linux machine)
+**Linux** → `dist/airthrow` + `dist/airthrow-gui` + `dist/airthrow-tray` (run on a Linux machine)
 ```bash
 ./build-linux.sh
 ```
@@ -96,9 +97,26 @@ python -m airthrow ping right # confirm it's reachable (start it first)
 
 `set-peer <slot> <name> <ip> [port]` where `<slot>` is `left` or `right`.
 
+## Desktop GUI (Windows + Linux)
+
+Prefer a window to the command line? Open the **control panel** — no commands to
+type:
+
+```bash
+python -m airthrow gui       # or launch airthrow-gui(.exe) directly (no console)
+```
+
+One window to set this device's **name**, assign the **left/right peers** (with a
+**Ping** button each), pick the **gesture** and **sensitivity**, toggle
+auto-open and the send animation, and **Start/Stop** the camera + receiver. A
+live status line at the bottom shows every throw and receive. "Show camera
+preview" pops the mirrored webcam view on demand; **Test border** previews the
+send animation.
+
 ## Use
 
-On every machine that should send or receive:
+On every machine that should send or receive, either open the **GUI** above and
+press **Start**, or from the terminal:
 
 ```bash
 python -m airthrow run
@@ -109,9 +127,11 @@ open image. Then:
 
 1. Open an image in any viewer (Photos, your browser, IrfanView, `eog`, …).
 2. Make the **gesture** (see below) toward **left** or **right**.
-3. The open image flies to that direction's peer and lands in its
-   `~/.airthrow/Received` folder — and **opens automatically** in the default
-   viewer on the receiving machine (turn off with `set-auto-open off`).
+3. An **animated gradient border** flashes around the image's window — the same
+   Huawei-style confirmation that it's being flung — and the open image flies to
+   that direction's peer and lands in its `~/.airthrow/Received` folder, where it
+   **opens automatically** in the default viewer (turn off with
+   `set-auto-open off`). Turn the border off with `set-animation off`.
 
 Press `q` or `Esc` to quit.
 
@@ -157,12 +177,14 @@ Autostart launches the windowed `airthrow-tray` so nothing pops up but the icon.
 | Command | What it does |
 |---|---|
 | `run [--camera N] [--debug]` | Foreground: camera + gestures + preview window |
+| `gui [--camera N]` | Open the desktop control-panel window |
 | `tray [--camera N]` | Background: run with a system-tray icon (no console) |
 | `set-gesture <two\|grab\|swipe>` | Choose the gesture style (default two-finger) |
 | `autostart <on\|off\|status>` | Start the tray app automatically on login |
 | `info` | Show this device's name, IP, port, settings and log path |
 | `set-sensitivity <d>` | Swipe travel needed to fire, 0.05 (easy) .. 0.9 (hard) |
 | `set-auto-open <on\|off>` | Auto-open received images in the default viewer |
+| `set-animation <on\|off>` | Gradient send border around the sent window on each throw |
 | `set-resend-block <secs>` | Ignore same file→same peer repeats within N secs (0 = off) |
 | `camtest` | Probe camera indices and report which deliver frames |
 | `selftest` | Load the hand model and process a frame (no camera needed) |

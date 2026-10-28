@@ -21,9 +21,9 @@ from pathlib import Path
 
 import cv2
 
-from . import transfer
+from . import send_overlay, transfer
 from .config import Config, local_ip
-from .foreground_image import current_image, foreground_window
+from .foreground_image import current_image, foreground_rect, foreground_window
 from .gestures import BaseHandDetector, GrabDetector, SwipeDetector, TwoFingerDetector
 from .logs import LOG_PATH, get_logger
 
@@ -71,7 +71,11 @@ class AirThrow:
         self.camera_index = camera_index
         self.debug = debug
         self.last_image: Path | None = None
+        # On-screen rect (x, y, w, h) of the window the image was seen in, for
+        # the send animation; tracked alongside last_image.
+        self.last_image_rect: tuple[int, int, int, int] | None = None
         self._held_image: Path | None = None  # locked at grab-time (grab mode)
+        self._held_rect: tuple[int, int, int, int] | None = None
         self.status = "Ready"
         self.status_color = (255, 255, 255)
         self.status_until = 0.0
@@ -103,6 +107,7 @@ class AirThrow:
         """Grab gesture started — lock the current image so moving the hand (or
         a changing foreground) doesn't swap what gets thrown."""
         self._held_image = self.last_image
+        self._held_rect = self.last_image_rect
         if self._held_image:
             self.set_status(f"Picked up {self._held_image.name} — move & open hand",
                             (0, 220, 255), 8)
@@ -111,16 +116,20 @@ class AirThrow:
 
     def on_cancel(self):
         self._held_image = None
+        self._held_rect = None
         self.set_status("Released (cancelled)", (180, 180, 180), 3)
 
     def on_throw(self, direction: str):
         """A gesture fired in `direction`. Use the held image (grab) or the
         current foreground image (swipe)."""
         image = self._held_image or self.last_image
+        rect = self._held_rect or self.last_image_rect
         self._held_image = None
-        self._do_throw(direction, image)
+        self._held_rect = None
+        self._do_throw(direction, image, rect)
 
-    def _do_throw(self, direction: str, image: Path | None):
+    def _do_throw(self, direction: str, image: Path | None,
+                  rect: tuple[int, int, int, int] | None = None):
         peer = self.config.peer_for(direction)
         arrow = "<<" if direction == "left" else ">>"
         if not peer:
@@ -155,6 +164,11 @@ class AirThrow:
         log.info("throwing %s -> %s (%s)", image.name, peer.name, peer.url())
         self.set_status(f"{arrow} Throwing {image.name} to {peer.name}...",
                         (0, 220, 255), 10)
+        if self.config.show_send_animation:
+            try:
+                send_overlay.flash(rect)
+            except Exception as exc:  # animation is cosmetic, never fatal
+                log.debug("send animation failed: %s", exc)
         threading.Thread(
             target=self._send_worker, args=(peer, image, key), daemon=True
         ).start()
@@ -301,9 +315,14 @@ class AirThrow:
         if WINDOW_NAME.lower() in (title or "").lower():
             return  # our own preview window; keep whatever we last saw
         img = current_image()
-        if img and img != self.last_image:
-            log.debug("foreground image -> %s", img)
-            self.last_image = img
+        if img:
+            # Remember the window it's shown in so the send border frames it.
+            rect = foreground_rect()
+            if rect:
+                self.last_image_rect = rect
+            if img != self.last_image:
+                log.debug("foreground image -> %s", img)
+                self.last_image = img
 
     # ---- overlay -----------------------------------------------------
     def _draw_overlay(self, frame):

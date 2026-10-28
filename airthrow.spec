@@ -1,8 +1,9 @@
 # -*- mode: python ; coding: utf-8 -*-
-"""PyInstaller spec for AirThrow — builds two single-file executables:
+"""PyInstaller spec for AirThrow — builds three single-file executables:
 
-  * airthrow       — console CLI (run/info/tray/...), shows a terminal
+  * airthrow       — console CLI (run/info/tray/gui/...), shows a terminal
   * airthrow-tray  — windowed (no console), for the background tray app
+  * airthrow-gui   — windowed (no console), the desktop control-panel window
 
 The same spec is used on Windows (.exe) and Linux. PyInstaller cannot cross-
 compile: run it on the OS you want binaries for.
@@ -43,6 +44,9 @@ hiddenimports += [
     "python_multipart",
 ]
 
+# The GUI and the send-border overlay use tkinter + PIL's ImageTk.
+hiddenimports += ["tkinter", "tkinter.ttk", "PIL.ImageTk"]
+
 # Windows autostart shortcut uses win32com (part of pywin32).
 if sys.platform.startswith("win"):
     hiddenimports += ["win32com", "win32com.client", "pythoncom", "pywintypes",
@@ -60,7 +64,7 @@ def make_analysis(entry):
         hiddenimports=hiddenimports,
         hookspath=[],
         runtime_hooks=[],
-        excludes=["tkinter"],  # not used; keeps the binary smaller
+        excludes=[],
         cipher=block_cipher,
         noarchive=False,
     )
@@ -84,6 +88,18 @@ pyz_tray = PYZ(a_tray.pure, a_tray.zipped_data, cipher=block_cipher)
 exe_tray = EXE(
     pyz_tray, a_tray.scripts, a_tray.binaries, a_tray.datas, [],
     name="airthrow-tray",
+    debug=False, bootloader_ignore_signals=False, strip=False, upx=False,
+    console=False,
+    disable_windowed_traceback=False, target_arch=None,
+    codesign_identity=None, entitlements_file=None,
+)
+
+# ---- windowed GUI executable (no console) ----------------------------------
+a_gui = make_analysis("run_gui.py")
+pyz_gui = PYZ(a_gui.pure, a_gui.zipped_data, cipher=block_cipher)
+exe_gui = EXE(
+    pyz_gui, a_gui.scripts, a_gui.binaries, a_gui.datas, [],
+    name="airthrow-gui",
     debug=False, bootloader_ignore_signals=False, strip=False, upx=False,
     console=False,
     disable_windowed_traceback=False, target_arch=None,
