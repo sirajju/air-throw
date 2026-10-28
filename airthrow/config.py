@@ -43,8 +43,9 @@ class Config:
     auto_open: bool = True
     # Block re-sending the same file to the same peer within this many seconds.
     resend_block_seconds: float = 10.0
-    # Gesture mode: "grab" (fist pick-and-throw) or "swipe" (flick).
-    gesture_mode: str = "grab"
+    # Gesture mode: "two" (two-finger swipe), "grab" (fist pick-and-throw),
+    # or "swipe" (whole-hand flick).
+    gesture_mode: str = "two"
     # direction slot -> Peer (or missing if unassigned)
     peers: dict[str, Peer] = field(default_factory=dict)
 
@@ -67,7 +68,7 @@ class Config:
             swipe_min_distance=float(raw.get("swipe_min_distance", 0.22)),
             auto_open=bool(raw.get("auto_open", True)),
             resend_block_seconds=float(raw.get("resend_block_seconds", 10.0)),
-            gesture_mode=raw.get("gesture_mode", "grab"),
+            gesture_mode=raw.get("gesture_mode", "two"),
             peers=peers,
         )
 

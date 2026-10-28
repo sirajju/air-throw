@@ -117,14 +117,16 @@ Press `q` or `Esc` to quit.
 
 ### Gestures
 
-Two modes (`set-gesture grab|swipe`, default **grab**):
+Three modes (`set-gesture two|grab|swipe`, default **two**):
 
-- **grab** (Huawei-style, default): make a **fist** to *pick up* the open image
-  (overlay shows "Picked up …"), move your hand toward the target, then **open
-  your hand** to release/send. Opening without moving far enough cancels — so
-  accidental sends are rare.
-- **swipe**: just **flick** your hand left or right. Simpler, but fires on any
-  fast motion.
+- **two** (two-finger swipe, default): hold up **two fingers** (index + middle,
+  the "peace" sign) and **flick** left or right. The pose must be held through
+  the whole motion, so stray hand movement won't fire — reliable and quick.
+- **grab** (Huawei-style): make a **fist** to *pick up* the open image (overlay
+  shows "Picked up …"), move toward the target, then **open your hand** to
+  release/send. Opening without moving far enough cancels.
+- **swipe**: just **flick** your whole hand left or right. Simplest, but fires
+  on any fast motion.
 
 **Which way?** The view is mirrored, so moving your hand **to your right** sends
 to the **right** peer and **to your left** sends to the **left** peer. If a
@@ -156,7 +158,7 @@ Autostart launches the windowed `airthrow-tray` so nothing pops up but the icon.
 |---|---|
 | `run [--camera N] [--debug]` | Foreground: camera + gestures + preview window |
 | `tray [--camera N]` | Background: run with a system-tray icon (no console) |
-| `set-gesture <grab\|swipe>` | Choose the gesture style (default grab) |
+| `set-gesture <two\|grab\|swipe>` | Choose the gesture style (default two-finger) |
 | `autostart <on\|off\|status>` | Start the tray app automatically on login |
 | `info` | Show this device's name, IP, port, settings and log path |
 | `set-sensitivity <d>` | Swipe travel needed to fire, 0.05 (easy) .. 0.9 (hard) |

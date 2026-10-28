@@ -74,12 +74,26 @@ def extended_finger_count(lm) -> int:
     return count
 
 
+def finger_states(lm) -> list[bool]:
+    """Extended/not for [index, middle, ring, pinky] (thumb ignored)."""
+    states = []
+    for tip, pip in ((8, 6), (12, 10), (16, 14), (20, 18)):
+        states.append(_dist(lm[tip], lm[0]) > _dist(lm[pip], lm[0]))
+    return states
+
+
 def is_fist(lm) -> bool:
     return extended_finger_count(lm) <= 1
 
 
 def is_open_hand(lm) -> bool:
     return extended_finger_count(lm) >= 3
+
+
+def is_two_finger(lm) -> bool:
+    """The 'peace' / V sign: index + middle up, ring + pinky down."""
+    index, middle, ring, pinky = finger_states(lm)
+    return index and middle and not ring and not pinky
 
 
 # --------------------------------------------------------------------------
@@ -200,6 +214,37 @@ class SwipeDetector(BaseHandDetector):
             log.debug("near-miss dx=%+.2f (need %.2f) dt=%.0fms",
                       dx, self.min_distance, dt * 1000)
         return None
+
+
+# --------------------------------------------------------------------------
+# Two-finger swipe gesture (hold index+middle up, then flick)
+# --------------------------------------------------------------------------
+class TwoFingerDetector(SwipeDetector):
+    """A swipe that only counts while the hand shows the two-finger (V) pose.
+
+    Requiring index+middle up (ring+pinky down) throughout the motion filters
+    out accidental hand movement, while staying as quick as a plain swipe.
+    """
+
+    def __init__(self, on_swipe: Callable[[str], None],
+                 min_distance: float = SWIPE_MIN_DISTANCE):
+        super().__init__(on_swipe, min_distance)
+        self.pose_ok = False
+
+    def _reset(self) -> None:
+        super()._reset()
+        self.pose_ok = False
+
+    def _update(self, lm, now: float) -> str | None:
+        self.pose_ok = is_two_finger(lm)
+        if not self.pose_ok:
+            # Pose broken: drop the motion so a swipe must be made with two
+            # fingers held the whole time.
+            self.history.clear()
+            self.cur_dx = 0.0
+            self.cur_dt = 0.0
+            return None
+        return super()._update(lm, now)
 
 
 # --------------------------------------------------------------------------

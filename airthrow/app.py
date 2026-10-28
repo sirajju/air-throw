@@ -24,7 +24,7 @@ import cv2
 from . import transfer
 from .config import Config, local_ip
 from .foreground_image import current_image, foreground_window
-from .gestures import BaseHandDetector, GrabDetector, SwipeDetector
+from .gestures import BaseHandDetector, GrabDetector, SwipeDetector, TwoFingerDetector
 from .logs import LOG_PATH, get_logger
 
 log = get_logger()
@@ -172,9 +172,12 @@ class AirThrow:
     # ---- detector ----------------------------------------------------
     def _build_detector(self) -> BaseHandDetector:
         dist = self.config.swipe_min_distance
-        if self.config.gesture_mode == "grab":
+        mode = self.config.gesture_mode
+        if mode == "grab":
             return GrabDetector(on_throw=self.on_throw, on_pick=self.on_pick,
                                 on_cancel=self.on_cancel, min_distance=dist)
+        if mode == "two":
+            return TwoFingerDetector(on_swipe=self.on_throw, min_distance=dist)
         return SwipeDetector(on_swipe=self.on_throw, min_distance=dist)
 
     # ---- entry points ------------------------------------------------
