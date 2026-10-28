@@ -33,6 +33,10 @@ log = get_logger()
 
 WINDOW_NAME = "AirThrow"
 POLL_EVERY = 8  # frames between foreground-image checks (~3-4x/sec)
+# Block re-sending the *same* file to the *same* peer within this window, so a
+# double swipe (or a hand lingering in frame) doesn't spam the receiver. A
+# different file, a different peer, or a modified file is always allowed.
+REDUNDANT_SECONDS = 10.0
 
 
 def open_camera(index: int):
@@ -79,6 +83,8 @@ class AirThrow:
         self.detector: SwipeDetector | None = None
         self._fps = 0.0
         self._last_frame_t = 0.0
+        # (peer_url, file_path, mtime) -> timestamp of last send, for dedupe.
+        self._recent_sends: dict[tuple[str, str, float], float] = {}
 
     # ---- status helpers ---------------------------------------------
     def set_status(self, text: str, color=(255, 255, 255), seconds: float = 4.0):
@@ -104,18 +110,40 @@ class AirThrow:
             self.set_status(f"{arrow} No image open to throw", (0, 180, 255))
             return
         image = self.last_image
+
+        # Redundant-send guard: same file to same peer within the window.
+        now = time.time()
+        self._recent_sends = {k: v for k, v in self._recent_sends.items()
+                              if now - v < REDUNDANT_SECONDS}
+        try:
+            mtime = image.stat().st_mtime
+        except OSError:
+            mtime = 0.0
+        key = (peer.url(), str(image), mtime)
+        last = self._recent_sends.get(key)
+        if last is not None:
+            ago = now - last
+            log.info("skip redundant send %s -> %s (sent %.1fs ago)",
+                     image.name, peer.name, ago)
+            self.set_status(f"{arrow} Already sent {image.name} to {peer.name} "
+                            f"({ago:.0f}s ago)", (0, 180, 255))
+            return
+        self._recent_sends[key] = now
+
         log.info("throwing %s -> %s (%s)", image.name, peer.name, peer.url())
         self.set_status(f"{arrow} Throwing {image.name} to {peer.name}...", (0, 220, 255), 10)
         threading.Thread(
-            target=self._send_worker, args=(peer, image), daemon=True
+            target=self._send_worker, args=(peer, image, key), daemon=True
         ).start()
 
-    def _send_worker(self, peer, image: Path):
+    def _send_worker(self, peer, image: Path, key):
         try:
             result = transfer.send_file(peer.url(), image, self.config.device_name)
             log.info("SENT %s -> %s (%s)", image.name, peer.name, result)
             self.set_status(f"Sent {image.name} -> {peer.name}", (0, 220, 0), 6)
         except Exception as exc:  # network/file errors shown, not fatal
+            # Failed send shouldn't count as "recently sent" — allow a retry.
+            self._recent_sends.pop(key, None)
             log.error("send failed %s -> %s: %s", image.name, peer.name, exc)
             self.set_status(f"Failed -> {peer.name}: {exc}", (0, 0, 255), 8)
 

@@ -181,6 +181,14 @@ airthrow run --camera 1  # then use a working index
 AirThrow tries DirectShow → MSMF on Windows and V4L2 on Linux, and drops to
 receive-only mode if frames never arrive (instead of hanging).
 
+## Duplicate throws
+
+Throwing the **same image to the same peer** again within ~10 seconds is
+skipped (the overlay shows "Already sent …"), so a double swipe or a hand
+lingering in frame won't spam the receiver. A **different image**, a
+**different peer**, or an **edited file** always sends. A failed send is not
+counted, so you can immediately retry.
+
 ## Notes & limits (stage 1)
 
 - **LAN only, no encryption/auth yet** — don't use on untrusted networks. Open
