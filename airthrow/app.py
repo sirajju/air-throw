@@ -126,6 +126,10 @@ class AirThrow:
         self._preview_fn = lambda: True      # whether to show the preview window
         self._quit_on_key = True             # q/ESC quits (CLI) vs hides (tray)
         self._on_preview_key = lambda: None  # called when q pressed in tray mode
+        # When set, annotated frames go here (GUI in-window preview) instead of
+        # an OpenCV window. Also always exposes the latest frame for feedback.
+        self._frame_sink = None
+        self.camera_ok = False               # True once frames are flowing
 
     # ---- status helpers ---------------------------------------------
     def set_status(self, text: str, color=(255, 255, 255), seconds: float = 4.0):
@@ -389,12 +393,16 @@ class AirThrow:
         self._camera_phase()
 
     def start_background(self, stop_event: threading.Event,
-                         preview_fn, on_preview_key):
-        """Tray/daemon: shared stop Event, preview toggled on demand."""
+                         preview_fn, on_preview_key, frame_sink=None):
+        """Tray/daemon/GUI: shared stop Event, preview toggled on demand.
+
+        If `frame_sink` is given, annotated frames are handed to it (the GUI
+        draws them in-window) instead of opening an OpenCV window."""
         self._stop = stop_event
         self._preview_fn = preview_fn
         self._quit_on_key = False
         self._on_preview_key = on_preview_key
+        self._frame_sink = frame_sink
         self._serve()
         self._camera_phase()
 
@@ -467,11 +475,25 @@ class AirThrow:
             self._update_fps()
             frame_no += 1
 
+            self.camera_ok = True
             frame, _ = self.detector.process(frame)
             if self.config.gesture_mode == "canvas":
                 self._canvas_tick()
 
-            if self._preview_fn():
+            want_preview = self._preview_fn()
+
+            # GUI path: hand annotated frames to the sink (drawn in-window).
+            if self._frame_sink is not None:
+                if want_preview:
+                    self._draw_overlay(frame)
+                    try:
+                        self._frame_sink(frame)
+                    except Exception:
+                        pass
+                continue
+
+            # CLI/tray path: an OpenCV window.
+            if want_preview:
                 if not window_open:
                     cv2.namedWindow(WINDOW_NAME, cv2.WINDOW_AUTOSIZE)
                     try:

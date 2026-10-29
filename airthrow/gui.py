@@ -18,6 +18,8 @@ import threading
 import tkinter as tk
 from tkinter import ttk
 
+from PIL import Image, ImageTk
+
 from . import DEFAULT_PORT, __version__, send_overlay
 from .send_overlay import STYLE_NAMES
 from .app import AirThrow, open_with_default_app
@@ -53,6 +55,8 @@ class GUI:
         self.worker: threading.Thread | None = None
         self.stop_event: threading.Event | None = None
         self.running = False
+        self._latest_frame = None   # newest annotated BGR frame from the camera
+        self._preview_imgtk = None  # keep a ref so Tk doesn't GC the image
 
         self.root = tk.Tk()
         self.root.title("AirThrow")
@@ -84,6 +88,7 @@ class GUI:
         self._build_ui()
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
         self._poll_status()
+        self._poll_preview()
 
     # ---- styling -----------------------------------------------------
     def _build_styles(self):
@@ -277,7 +282,16 @@ class GUI:
         ttk.Checkbutton(rrow, text="Show camera preview", variable=self.v_preview,
                         command=self._preview_changed).pack(side="left", padx=12)
 
-        arow = ttk.Frame(run, style="Card.TFrame"); arow.pack(fill="x", pady=(8, 0))
+        # Live tracking indicator + in-window preview.
+        self.track_lbl = ttk.Label(run, text="Camera: stopped",
+                                   style="Muted.TLabel")
+        self.track_lbl.pack(anchor="w", pady=(10, 4))
+        self.preview_label = tk.Label(run, bg="#000000", width=48, height=14)
+        self.preview_label.pack(fill="x")
+        self._set_preview_placeholder("Press Start, then tick “Show camera "
+                                      "preview”")
+
+        arow = ttk.Frame(run, style="Card.TFrame"); arow.pack(fill="x", pady=(10, 0))
         ttk.Button(arow, text="Open received folder",
                    command=self._open_received).pack(side="left")
         ttk.Button(arow, text="Open log", command=self._open_log).pack(
@@ -514,17 +528,25 @@ class GUI:
         self._save_settings()
         self.config = Config.load()
         self.camera_index = self.v_camera.get()
-        self.app = AirThrow(self.config, camera_index=self.camera_index)
+        # debug=True so the preview shows the tracking overlay (hand state,
+        # swipe progress) — makes it obvious whether it's tracking.
+        self.app = AirThrow(self.config, camera_index=self.camera_index,
+                            debug=True)
         self.stop_event = threading.Event()
+        self._latest_frame = None
         self.worker = threading.Thread(
             target=self.app.start_background,
             args=(self.stop_event, lambda: self.v_preview.get(),
-                  self._preview_hidden),
+                  self._preview_hidden, self._frame_sink),
             name="airthrow-camera", daemon=True)
         self.worker.start()
         self.running = True
         self.start_btn.configure(text="Stop")
         self._flash_status("Running — camera + receiver started", OK)
+
+    def _frame_sink(self, frame):
+        # Called from the camera thread; just stash the latest frame (atomic).
+        self._latest_frame = frame
 
     def _stop(self):
         if self.stop_event:
@@ -533,11 +555,15 @@ class GUI:
             self.worker.join(timeout=3)
         self.running = False
         self.app = None
+        self._latest_frame = None
+        self.track_lbl.configure(text="Camera: stopped")
+        self._set_preview_placeholder("Stopped")
         self.start_btn.configure(text="Start")
         self._flash_status("Stopped", MUTED)
 
     def _preview_changed(self):
-        pass  # value is read live by the camera loop via v_preview.get()
+        if not self.v_preview.get():
+            self._set_preview_placeholder("Preview off (tracking still runs)")
 
     def _preview_hidden(self):
         # Called from the camera thread when the user pressed q in the preview.
@@ -553,6 +579,30 @@ class GUI:
         else:
             self._flash_status("No log yet — Start first", WARN)
 
+    # ---- preview + tracking -----------------------------------------
+    def _set_preview_placeholder(self, text):
+        self.preview_label.configure(image="", text=text, fg="#d0d0d4",
+                                     bg="#000000", font=(FONT, 11),
+                                     compound="center", height=14)
+        self._preview_imgtk = None
+
+    def _poll_preview(self):
+        try:
+            if self.running and self.v_preview.get() and self._latest_frame is not None:
+                frame = self._latest_frame  # BGR numpy
+                h, w = frame.shape[:2]
+                target_w = max(240, self.preview_label.winfo_width() - 4)
+                scale = target_w / w
+                size = (int(w * scale), int(h * scale))
+                rgb = frame[:, :, ::-1]  # BGR -> RGB
+                img = Image.fromarray(rgb).resize(size)
+                self._preview_imgtk = ImageTk.PhotoImage(img)
+                self.preview_label.configure(image=self._preview_imgtk, text="",
+                                             height=0)
+        except Exception as exc:
+            log.debug("preview render failed: %s", exc)
+        self.root.after(66, self._poll_preview)  # ~15 fps
+
     # ---- status ------------------------------------------------------
     def _flash_status(self, text: str, color=FG):
         if hasattr(self, "status_lbl"):  # may fire during UI construction
@@ -560,9 +610,29 @@ class GUI:
 
     def _poll_status(self):
         if self.running and self.app:
-            self.status_lbl.configure(text=f"  ●  {self.app.status}",
-                                      fg=ACCENT)
-        self.root.after(500, self._poll_status)
+            self.status_lbl.configure(text=f"  ●  {self.app.status}", fg=ACCENT)
+            self.track_lbl.configure(text=self._tracking_text(),
+                                     foreground=self._tracking_color())
+        self.root.after(400, self._poll_status)
+
+    def _tracking_text(self) -> str:
+        app = self.app
+        if not app:
+            return "Camera: stopped"
+        det = app.detector
+        if not getattr(app, "camera_ok", False):
+            return "Camera: starting… (or no webcam → receive-only)"
+        if det and det.hand_present:
+            fingers = getattr(det, "fingers", 0)
+            img = app.last_image.name if app.last_image else "no image open"
+            return f"Tracking ✓  hand detected ({fingers} fingers)  ·  {img}"
+        return "Camera live — show your hand to the webcam"
+
+    def _tracking_color(self):
+        app = self.app
+        if app and app.detector and app.detector.hand_present:
+            return OK
+        return MUTED
 
     def _on_close(self):
         if self.running:
