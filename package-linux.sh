@@ -26,20 +26,32 @@ done
 install_system_deps() {
     [ "$NO_APT" -eq 1 ] && return 0
     local SUDO=""; [ "$(id -u)" -ne 0 ] && SUDO="sudo"
+    # Best-effort: packages are mostly present already, and names vary by release
+    # (e.g. Ubuntu 24.04 renamed libglib2.0-0 -> libglib2.0-0t64). We never let a
+    # missing/renamed package abort the build — the libs we truly need at runtime
+    # ship with any desktop, and apt installs each of the rest if it can.
     if command -v apt-get >/dev/null 2>&1; then
         echo "Installing system packages (apt)..."
         $SUDO apt-get update -qq || true
-        $SUDO apt-get install -y python3-venv binutils libgl1 libglib2.0-0 xdotool
+        # glib package name differs across releases; pick whichever exists.
+        local glib="libglib2.0-0"
+        apt-cache show libglib2.0-0t64 >/dev/null 2>&1 && glib="libglib2.0-0t64"
+        for pkg in python3-venv binutils libgl1 "$glib" xdotool; do
+            $SUDO apt-get install -y "$pkg" || echo "  (skipped $pkg)"
+        done
     elif command -v dnf >/dev/null 2>&1; then
         echo "Installing system packages (dnf)..."
-        $SUDO dnf install -y python3 binutils mesa-libGL glib2 xdotool
+        for pkg in python3 binutils mesa-libGL glib2 xdotool; do
+            $SUDO dnf install -y "$pkg" || echo "  (skipped $pkg)"
+        done
     elif command -v pacman >/dev/null 2>&1; then
         echo "Installing system packages (pacman)..."
-        $SUDO pacman -S --needed --noconfirm python binutils mesa glib2 xdotool
+        $SUDO pacman -S --needed --noconfirm python binutils mesa glib2 xdotool || true
     else
         echo "No known package manager (apt/dnf/pacman). Install manually:"
         echo "  a venv tool, binutils, libGL, glib2, xdotool"
     fi
+    return 0
 }
 
 # --- 2. build inside a local virtualenv ---------------------------------------
