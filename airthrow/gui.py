@@ -17,7 +17,7 @@ import threading
 import tkinter as tk
 from tkinter import ttk
 
-from . import __version__, send_overlay
+from . import DEFAULT_PORT, __version__, send_overlay
 from .send_overlay import STYLE_NAMES
 from .app import AirThrow, open_with_default_app
 from .config import RECEIVED_DIR, SLOTS, Config, local_ip
@@ -141,8 +141,8 @@ class GUI:
         for slot in SLOTS:
             self._peer_row(peers, slot)
 
-        # Extra devices (3+ enables the picker) ------------------------
-        dev2 = self._card(outer, "More devices  (3+ shows an on-screen picker)")
+        # Extra devices (threshold+ enables the picker) ----------------
+        dev2 = self._card(outer, "More devices  (picker appears at the threshold)")
         self.dev_list = tk.Listbox(dev2, height=4, bg="#2d313b", fg=FG,
                                    borderwidth=0, highlightthickness=0,
                                    selectbackground=ACCENT, selectforeground="#06231f",
@@ -150,13 +150,19 @@ class GUI:
         self.dev_list.pack(fill="x")
         addrow = ttk.Frame(dev2, style="Card.TFrame"); addrow.pack(fill="x", pady=(6, 0))
         self.v_dev_name = tk.StringVar(); self.v_dev_ip = tk.StringVar()
-        self.v_dev_port = tk.StringVar()
+        self.v_dev_port = tk.StringVar(value=str(DEFAULT_PORT))
         ttk.Entry(addrow, textvariable=self.v_dev_name, width=10).pack(side="left", padx=2)
         ttk.Entry(addrow, textvariable=self.v_dev_ip, width=13).pack(side="left", padx=2)
         ttk.Entry(addrow, textvariable=self.v_dev_port, width=6).pack(side="left", padx=2)
         ttk.Button(addrow, text="Add", width=5, command=self._add_device).pack(side="left", padx=2)
         ttk.Button(addrow, text="Remove", command=self._remove_device).pack(side="left")
         ttk.Button(addrow, text="Preview picker", command=self._preview_picker).pack(side="right")
+
+        trow = ttk.Frame(dev2, style="Card.TFrame"); trow.pack(fill="x", pady=(6, 0))
+        ttk.Label(trow, text="Show picker when devices ≥", style="Card.TLabel").pack(side="left")
+        self.v_threshold = tk.IntVar(value=self.config.picker_threshold)
+        ttk.Spinbox(trow, from_=2, to=50, width=4, textvariable=self.v_threshold,
+                    command=self._save_threshold).pack(side="left", padx=6)
         self._refresh_devices()
 
         # Gesture & behaviour -----------------------------------------
@@ -281,7 +287,7 @@ class GUI:
             self._flash_status(f"{slot}: enter an IP address first", WARN)
             return
         try:
-            port_i = int(port_v) if port_v else self.config.listen_port
+            port_i = int(port_v) if port_v else DEFAULT_PORT
         except ValueError:
             self._flash_status(f"{slot}: port must be a number", WARN)
             return
@@ -294,7 +300,7 @@ class GUI:
         if not ip_v:
             return
         try:
-            port_i = int(port.get().strip() or self.config.listen_port)
+            port_i = int(port.get().strip() or DEFAULT_PORT)
         except ValueError:
             return
         self.peer_status[slot].configure(foreground=WARN)  # pinging
@@ -320,8 +326,17 @@ class GUI:
         for d in self.config.devices:
             self.dev_list.insert(tk.END, f"{d.name}   {d.ip}:{d.port}")
         n = len(self.config.all_devices())
-        tag = "picker ON" if self.config.use_picker() else "need 3+ for picker"
+        tag = ("picker ON" if self.config.use_picker()
+               else f"need {self.config.picker_threshold}+ for picker")
         self._flash_status(f"{n} target(s) — {tag}", MUTED)
+
+    def _save_threshold(self):
+        try:
+            self.config.picker_threshold = max(2, int(self.v_threshold.get()))
+        except (ValueError, tk.TclError):
+            return
+        self.config.save()
+        self._refresh_devices()
 
     def _add_device(self):
         name = self.v_dev_name.get().strip()
@@ -330,12 +345,13 @@ class GUI:
             self._flash_status("Enter a name and IP for the device", WARN)
             return
         try:
-            port = int(self.v_dev_port.get().strip() or self.config.listen_port)
+            port = int(self.v_dev_port.get().strip() or DEFAULT_PORT)
         except ValueError:
             self._flash_status("Port must be a number", WARN)
             return
         self.config.add_device(name, ip, port)
-        self.v_dev_name.set(""); self.v_dev_ip.set(""); self.v_dev_port.set("")
+        self.v_dev_name.set(""); self.v_dev_ip.set("")
+        self.v_dev_port.set(str(DEFAULT_PORT))
         self._refresh_devices()
 
     def _remove_device(self):

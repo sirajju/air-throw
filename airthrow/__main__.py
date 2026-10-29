@@ -197,11 +197,24 @@ def cmd_devices(args):
         print("  (none)")
     all_d = cfg.all_devices()
     print(f"\nAll targets ({len(all_d)}):", ", ".join(d.name for d in all_d) or "(none)")
+    print(f"Picker threshold: {cfg.picker_threshold} devices "
+          f"(change with set-picker-threshold).")
     if cfg.use_picker():
-        print("3+ devices: a swipe opens the on-screen picker (swipe to move, "
-              "hold to send).")
+        print(f"{len(all_d)} devices: a swipe opens the picker — swipe left/right "
+              "to move the highlight, hold to send.")
     else:
-        print("2 or fewer: swipe left/right sends straight to that slot.")
+        print("Below threshold: swipe left/right sends straight to that slot.")
+
+
+def cmd_set_picker_threshold(args):
+    if not 2 <= args.count <= 50:
+        sys.exit("threshold should be between 2 and 50")
+    cfg = Config.load()
+    cfg.picker_threshold = args.count
+    cfg.save()
+    print(f"Picker shows when there are {args.count}+ devices "
+          f"(currently {len(cfg.all_devices())}; picker "
+          f"{'ON' if cfg.use_picker() else 'off'}).")
 
 
 def cmd_add_device(args):
@@ -381,6 +394,11 @@ def build_parser() -> argparse.ArgumentParser:
     rd = sub.add_parser("remove-device", help="remove an extra device by name")
     rd.add_argument("name")
     rd.set_defaults(func=cmd_remove_device)
+
+    pt = sub.add_parser("set-picker-threshold",
+                        help="how many devices before a swipe shows the picker (>=2)")
+    pt.add_argument("count", type=int)
+    pt.set_defaults(func=cmd_set_picker_threshold)
 
     sub.add_parser("preview-select",
                    help="simulate the device picker (no send) to see it"

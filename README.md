@@ -152,12 +152,24 @@ python -m airthrow devices         # list all targets; shows if the picker is on
 python -m airthrow preview-select  # simulate the picker (no send) to see it
 ```
 
-Once there are 3+ targets, a throw gesture **opens a gradient-bordered picker**
-listing every device. **Swipe** to move the highlight, then **hold** (stop
-swiping for ~1.8 s) and it sends to the highlighted device. The box stays put
-while you choose — a flickery gesture won't make it blink, because the dwell
-timer resets on each swipe (built-in debounce) and the box only closes when it
-confirms.
+Once there are enough targets (3 by default), a throw gesture **opens a
+gradient-bordered picker** listing every device. You only have two swipe
+directions, so in the picker they become **navigation**: swipe **right = next**,
+**left = previous** (it wraps), then **hold** (stop swiping ~1.8 s) to send to the
+highlighted device. That's how any number of devices works with just left/right.
+The box stays put while you choose — a flickery gesture won't make it blink,
+because the dwell timer resets on each swipe (built-in debounce) and the box only
+closes when it confirms.
+
+Change how many devices trigger the picker (minimum 2):
+
+```bash
+python -m airthrow set-picker-threshold 2   # show the picker even with 2 devices
+```
+
+The port is optional when adding a peer or device — it defaults to **8720**
+(`set-peer right "Studio-PC" 192.168.0.217` and
+`add-device "Bedroom-PC" 192.168.0.41` both use 8720).
 
 ## Desktop GUI (Windows + Linux)
 
@@ -280,6 +292,7 @@ Autostart launches the windowed `airthrow-tray` so nothing pops up but the icon.
 | `devices` | List all targets; 3+ enables the on-screen picker |
 | `add-device <name> <ip> [port]` | Add an extra device (beyond left/right) |
 | `remove-device <name>` | Remove an extra device |
+| `set-picker-threshold <n>` | How many devices before a swipe shows the picker (≥2) |
 | `preview-select` | Simulate the device picker (no send) to see it |
 | `ping <slot>` | Check a peer is reachable |
 

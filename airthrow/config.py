@@ -54,8 +54,11 @@ class Config:
     # 2-device path (swipe left/right sends straight away).
     peers: dict[str, Peer] = field(default_factory=dict)
     # Extra named devices beyond left/right. When the total number of devices
-    # is 3+, a swipe opens an on-screen picker instead of sending immediately.
+    # reaches picker_threshold, a swipe opens an on-screen picker instead of
+    # sending immediately.
     devices: list[Peer] = field(default_factory=list)
+    # How many total devices before a swipe shows the picker (minimum 2).
+    picker_threshold: int = 3
 
     # ---- persistence -------------------------------------------------
     @classmethod
@@ -81,6 +84,7 @@ class Config:
             send_animation_style=raw.get("send_animation_style", "aurora"),
             peers=peers,
             devices=[Peer(**d) for d in raw.get("devices", []) if d],
+            picker_threshold=max(2, int(raw.get("picker_threshold", 3))),
         )
 
     def save(self) -> None:
@@ -97,6 +101,7 @@ class Config:
             "send_animation_style": self.send_animation_style,
             "peers": {slot: asdict(peer) for slot, peer in self.peers.items()},
             "devices": [asdict(d) for d in self.devices],
+            "picker_threshold": self.picker_threshold,
         }
         CONFIG_PATH.write_text(json.dumps(data, indent=2), encoding="utf-8")
 
@@ -146,9 +151,9 @@ class Config:
         return unique
 
     def use_picker(self) -> bool:
-        """True when there are 3+ devices, so a swipe should open the picker
-        instead of sending straight to a left/right slot."""
-        return len(self.all_devices()) >= 3
+        """True when there are at least `picker_threshold` devices, so a swipe
+        should open the picker instead of sending straight to a left/right slot."""
+        return len(self.all_devices()) >= max(2, self.picker_threshold)
 
 
 def local_ip() -> str:
