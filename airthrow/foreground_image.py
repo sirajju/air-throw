@@ -68,6 +68,37 @@ def _foreground_windows() -> tuple[int | None, str]:
     return (pid, title)
 
 
+def _visible_windows_windows() -> list[tuple[int, str]]:
+    """(pid, title) for every visible top-level window, top-most Z-order first.
+
+    Lets us find the image viewer even when it isn't the focused window —
+    e.g. while the AirThrow preview has focus during a gesture."""
+    try:
+        import win32gui
+        import win32process
+    except ImportError:
+        return []
+    out: list[tuple[int, str]] = []
+
+    def cb(hwnd, _):
+        if not win32gui.IsWindowVisible(hwnd):
+            return
+        title = win32gui.GetWindowText(hwnd)
+        if not title:
+            return
+        try:
+            _, pid = win32process.GetWindowThreadProcessId(hwnd)
+        except Exception:
+            return
+        out.append((pid, title))
+
+    try:
+        win32gui.EnumWindows(cb, None)  # enumerates top (foreground) to bottom
+    except Exception:
+        return []
+    return out
+
+
 def _foreground_linux() -> tuple[int | None, str]:
     win_id = _xdotool("getactivewindow")
     if not win_id:
@@ -207,10 +238,36 @@ def _search_common_dirs(filename: str) -> Path | None:
 # Public entrypoint
 # --------------------------------------------------------------------------
 def current_image() -> Path | None:
-    """Best guess at the image open in the foreground window, or None."""
+    """Best guess at the image the user has open, or None.
+
+    Tries the focused window first; if that's our own preview (or has no image),
+    scans the other visible windows top-first so the image viewer is still found
+    while the AirThrow preview holds focus during a gesture."""
     pid, title = foreground_window()
-    if pid:
+    if pid and "airthrow" not in (title or "").lower():
         hit = _open_image_of_pid(pid)
         if hit:
             return hit
+        hit = _image_from_title(title)
+        if hit:
+            return hit
+
+    # Focused window gave nothing (or is our preview): scan other windows.
+    if IS_WINDOWS:
+        windows = [(p, t) for p, t in _visible_windows_windows()
+                   if "airthrow" not in t.lower()]
+        # Open-file check per unique process (top-first), then title fallback.
+        seen: set[int] = set()
+        for wpid, _wtitle in windows:
+            if wpid in seen:
+                continue
+            seen.add(wpid)
+            hit = _open_image_of_pid(wpid)
+            if hit:
+                return hit
+        for _wpid, wtitle in windows:
+            hit = _image_from_title(wtitle)
+            if hit:
+                return hit
+
     return _image_from_title(title)
