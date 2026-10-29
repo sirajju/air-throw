@@ -231,11 +231,17 @@ Press `q` or `Esc` to quit.
 
 ### Gestures
 
-Three modes (`set-gesture two|grab|swipe`, default **two**):
+Four modes (`set-gesture palm|two|grab|swipe`, default **palm**):
 
-- **two** (two-finger swipe, default): hold up **two fingers** (index + middle,
-  the "peace" sign) and **flick** left or right. The pose must be held through
-  the whole motion, so stray hand movement won't fire — reliable and quick.
+- **palm** (hold-to-side, default — **most reliable**): hold your **open hand**
+  in the **left or right third** of the camera view for about half a second. No
+  fast motion and no finger pose to nail, so it works on cheap webcams and in
+  poor light where a timed flick keeps missing. The preview shades the two
+  "hold here" zones and fills them as you dwell. This needs only a normal RGB
+  webcam — **no IR or depth sensor**.
+- **two** (two-finger swipe): hold up **two fingers** (index + middle, the
+  "peace" sign) and **flick** left or right. The pose must be held through the
+  whole motion, so stray hand movement won't fire — quick but fussier than palm.
 - **grab** (Huawei-style): make a **fist** to *pick up* the open image (overlay
   shows "Picked up …"), move toward the target, then **open your hand** to
   release/send. Opening without moving far enough cancels.
@@ -273,7 +279,7 @@ Autostart launches the windowed `airthrow-tray` so nothing pops up but the icon.
 | `run [--camera N] [--debug]` | Foreground: camera + gestures + preview window |
 | `gui [--camera N]` | Open the desktop control-panel window |
 | `tray [--camera N]` | Background: run with a system-tray icon (no console) |
-| `set-gesture <two\|grab\|swipe>` | Choose the gesture style (default two-finger) |
+| `set-gesture <palm\|two\|grab\|swipe>` | Choose the gesture style (default palm-reach) |
 | `autostart <on\|off\|status>` | Start the tray app automatically on login |
 | `info` | Show this device's name, IP, port, settings and log path |
 | `set-sensitivity <d>` | Swipe travel needed to fire, 0.05 (easy) .. 0.9 (hard) |

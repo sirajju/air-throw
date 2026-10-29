@@ -90,6 +90,8 @@ def cmd_set_gesture(args):
     cfg.gesture_mode = args.mode
     cfg.save()
     msg = {
+        "palm": "Gesture: palm-reach (hold your OPEN hand to the left/right side "
+                "~0.5s — most reliable, no fast motion needed).",
         "two": "Gesture: two-finger swipe (hold index+middle up, flick left/right).",
         "grab": "Gesture: grab-and-throw (make a fist to pick up, move, open hand to send).",
         "swipe": "Gesture: swipe (flick your whole hand left/right).",
@@ -132,7 +134,8 @@ def cmd_info(args):
     print(f"  LAN address : {local_ip()}:{cfg.listen_port}")
     print(f"  peers to add on OTHER machines: --ip {local_ip()} --port {cfg.listen_port}")
     from . import autostart
-    print(f"  gesture     : {cfg.gesture_mode} (two = two-finger swipe; grab = fist pick-and-throw; swipe = flick)")
+    print(f"  gesture     : {cfg.gesture_mode} (palm = hold open hand to a side; "
+          f"two = two-finger swipe; grab = fist pick-and-throw; swipe = flick)")
     print(f"  autostart   : {'on' if autostart.status() else 'off'}")
     print(f"  sensitivity : {cfg.swipe_min_distance:.2f} (swipe travel needed; lower = easier)")
     print(f"  auto-open   : {'on' if cfg.auto_open else 'off'} (open received images automatically)")
@@ -306,7 +309,7 @@ def build_parser() -> argparse.ArgumentParser:
     g.set_defaults(func=cmd_gui)
 
     sg = sub.add_parser("set-gesture", help="choose gesture: two, grab or swipe")
-    sg.add_argument("mode", choices=("two", "grab", "swipe"))
+    sg.add_argument("mode", choices=("palm", "two", "grab", "swipe"))
     sg.set_defaults(func=cmd_set_gesture)
 
     au = sub.add_parser("autostart", help="start on login: on/off/status")

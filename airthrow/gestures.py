@@ -266,6 +266,76 @@ class TwoFingerDetector(SwipeDetector):
 
 
 # --------------------------------------------------------------------------
+# Palm-reach gesture (hold an open hand toward a side) — the most reliable
+# --------------------------------------------------------------------------
+PALM_LEFT_ZONE = 0.34   # mirrored x below this = left side
+PALM_RIGHT_ZONE = 0.66  # mirrored x above this = right side
+PALM_DWELL_SECONDS = 0.45  # hold the open palm in a side zone this long to fire
+
+
+class PalmReachDetector(BaseHandDetector):
+    """Reach your OPEN HAND toward a side and hold briefly to send.
+
+    Unlike the swipe gestures this needs no fast motion — only an open palm
+    (the pose MediaPipe detects most reliably) held in the left/right third of
+    the frame for a fraction of a second. That makes it work on cheap webcams
+    and in poor light, where a timed flick keeps missing.
+    """
+
+    def __init__(self, on_swipe: Callable[[str], None],
+                 min_distance: float = SWIPE_MIN_DISTANCE):
+        super().__init__(min_distance)
+        self.on_swipe = on_swipe
+        self.last_fire = 0.0
+        self._zone: str | None = None
+        self._since = 0.0
+        self.dwell = 0.0  # 0..1 progress, for the overlay
+
+    def _reset(self) -> None:
+        self._zone = None
+        self._since = 0.0
+        self.dwell = 0.0
+        self.cur_dx = 0.0
+
+    def _update(self, lm, now: float) -> str | None:
+        if not is_open_hand(lm):
+            self._reset()
+            return None
+
+        x = lm[9].x  # palm centre, mirrored 0..1
+        zone = ("left" if x < PALM_LEFT_ZONE
+                else "right" if x > PALM_RIGHT_ZONE else None)
+
+        if zone is None:
+            self._zone = None
+            self._since = 0.0
+            self.dwell = 0.0
+            self.cur_dx = 0.0
+            return None
+
+        if zone != self._zone:
+            self._zone = zone
+            self._since = now
+
+        held = now - self._since
+        self.dwell = min(held / PALM_DWELL_SECONDS, 1.0)
+        # Drive the existing progress bar (abs(cur_dx)/min_distance).
+        sign = 1.0 if zone == "right" else -1.0
+        self.cur_dx = sign * self.dwell * self.min_distance
+
+        if now - self.last_fire < COOLDOWN_SECONDS:
+            return None
+        if held >= PALM_DWELL_SECONDS:
+            self.last_fire = now
+            self._zone = None
+            self.dwell = 0.0
+            log.info("PALM reach %s (held open hand in %s zone)", zone, zone)
+            self.on_swipe(zone)
+            return zone
+        return None
+
+
+# --------------------------------------------------------------------------
 # Grab-and-throw gesture (Huawei-style)
 # --------------------------------------------------------------------------
 class GrabDetector(BaseHandDetector):

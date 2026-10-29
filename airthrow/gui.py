@@ -170,10 +170,11 @@ class GUI:
         grow = ttk.Frame(beh, style="Card.TFrame"); grow.pack(fill="x")
         ttk.Label(grow, text="Gesture", style="Card.TLabel", width=10).pack(side="left")
         cb = ttk.Combobox(grow, textvariable=self.v_gesture, state="readonly",
-                          values=("two", "grab", "swipe"), width=10)
+                          values=("palm", "two", "grab", "swipe"), width=10)
         cb.pack(side="left", padx=6)
         cb.bind("<<ComboboxSelected>>", lambda e: self._save_settings())
-        ttk.Label(grow, text="(two = two-finger swipe)", style="Muted.TLabel").pack(
+        ttk.Label(grow, text="(palm = hold open hand to a side)",
+                  style="Muted.TLabel").pack(
             side="left")
 
         srow = ttk.Frame(beh, style="Card.TFrame"); srow.pack(fill="x", pady=(8, 0))

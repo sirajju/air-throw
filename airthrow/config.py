@@ -43,9 +43,9 @@ class Config:
     auto_open: bool = True
     # Block re-sending the same file to the same peer within this many seconds.
     resend_block_seconds: float = 10.0
-    # Gesture mode: "two" (two-finger swipe), "grab" (fist pick-and-throw),
-    # or "swipe" (whole-hand flick).
-    gesture_mode: str = "two"
+    # Gesture mode: "palm" (hold open hand to a side — most reliable), "two"
+    # (two-finger swipe), "grab" (fist pick-and-throw), or "swipe" (flick).
+    gesture_mode: str = "palm"
     # Flash an animated gradient border around the sent window on each throw.
     show_send_animation: bool = True
     # Which border style to use (see send_overlay.STYLES): aurora/rainbow/...
@@ -79,7 +79,7 @@ class Config:
             swipe_min_distance=float(raw.get("swipe_min_distance", 0.22)),
             auto_open=bool(raw.get("auto_open", True)),
             resend_block_seconds=float(raw.get("resend_block_seconds", 10.0)),
-            gesture_mode=raw.get("gesture_mode", "two"),
+            gesture_mode=raw.get("gesture_mode", "palm"),
             show_send_animation=bool(raw.get("show_send_animation", True)),
             send_animation_style=raw.get("send_animation_style", "aurora"),
             peers=peers,

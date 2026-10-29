@@ -24,7 +24,8 @@ import cv2
 from . import send_overlay, transfer
 from .config import Config, local_ip
 from .foreground_image import current_image, foreground_rect, foreground_window
-from .gestures import BaseHandDetector, GrabDetector, SwipeDetector, TwoFingerDetector
+from .gestures import (BaseHandDetector, GrabDetector, PalmReachDetector,
+                       SwipeDetector, TwoFingerDetector)
 from .logs import LOG_PATH, get_logger
 
 log = get_logger()
@@ -280,7 +281,10 @@ class AirThrow:
                                 on_cancel=self.on_cancel, min_distance=dist)
         if mode == "two":
             return TwoFingerDetector(on_swipe=self.on_throw, min_distance=dist)
-        return SwipeDetector(on_swipe=self.on_throw, min_distance=dist)
+        if mode == "swipe":
+            return SwipeDetector(on_swipe=self.on_throw, min_distance=dist)
+        # Default: palm-reach (hold open hand to a side) — most reliable.
+        return PalmReachDetector(on_swipe=self.on_throw, min_distance=dist)
 
     # ---- entry points ------------------------------------------------
     def run(self):
@@ -415,6 +419,8 @@ class AirThrow:
     # ---- overlay -----------------------------------------------------
     def _draw_overlay(self, frame):
         h, w = frame.shape[:2]
+        if self.config.gesture_mode == "palm":
+            self._draw_palm_zones(frame)
         left = self.config.peer_for("left")
         right = self.config.peer_for("right")
         cv2.putText(frame, f"<< {left.name if left else '(none)'}",
@@ -435,6 +441,30 @@ class AirThrow:
 
         if self.debug:
             self._draw_debug(frame)
+
+    def _draw_palm_zones(self, frame):
+        """Shade the left/right 'hold your open hand here' zones and show the
+        dwell progress as the zone fills in."""
+        from .gestures import PALM_LEFT_ZONE, PALM_RIGHT_ZONE
+        h, w = frame.shape[:2]
+        lx = int(PALM_LEFT_ZONE * w)
+        rx = int(PALM_RIGHT_ZONE * w)
+        det = self.detector
+        zone = getattr(det, "_zone", None)
+        dwell = getattr(det, "dwell", 0.0)
+
+        for side, (x0, x1) in (("left", (0, lx)), ("right", (rx, w))):
+            active = zone == side
+            fill = dwell if active else 0.0
+            overlay = frame.copy()
+            colour = (0, 220, 0) if fill >= 1.0 else (0, 180, 255)
+            cv2.rectangle(overlay, (x0, 0), (x1, h), colour, -1)
+            alpha = 0.12 + 0.33 * fill if active else 0.08
+            cv2.addWeighted(overlay, alpha, frame, 1 - alpha, 0, frame)
+            label = "HOLD OPEN HAND"
+            cv2.putText(frame, label, (x0 + 10 if side == "left" else x1 - 220,
+                                       h // 2),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
 
     def _draw_debug(self, frame):
         h, w = frame.shape[:2]
