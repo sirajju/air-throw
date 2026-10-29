@@ -22,8 +22,29 @@ Four pieces work together:
 
 ## Install
 
-Two ways to run AirThrow: a **standalone executable** (no Python needed) or
-**from source**.
+### Quick install (one command)
+
+Installs from this git repo into an isolated environment and adds an `airthrow`
+command. Needs **git** and **Python 3** present.
+
+**Linux / macOS**
+```bash
+curl -fsSL https://raw.githubusercontent.com/sirajju/air-throw/main/install.sh | bash
+```
+
+**Windows (PowerShell)**
+```powershell
+irm https://raw.githubusercontent.com/sirajju/air-throw/main/install.ps1 | iex
+```
+
+Then open a new terminal and run `airthrow gui` (or `airthrow info`). On Linux the
+installer also pulls the needed system packages (venv, OpenCV libs, `xdotool`).
+Re-run the same command any time to update.
+
+---
+
+Prefer to do it by hand? Two more ways: a **standalone executable** (no Python
+needed) or **from source**.
 
 ### Prebuilt archives (build once, reuse — no rebuilding every time)
 
