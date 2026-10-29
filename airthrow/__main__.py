@@ -35,6 +35,24 @@ def cmd_gui(args):
     run_gui(camera_index=args.camera)
 
 
+def cmd_daemon(args):
+    from .app import run_daemon
+    run_daemon(camera_index=args.camera)
+
+
+def cmd_service(args):
+    from . import autostart
+    if args.action == "install":
+        where = autostart.service_install()
+        print(f"Service installed and started -> {where}")
+        print("It will start automatically on login. Check: airthrow service status")
+    elif args.action == "uninstall":
+        ok = autostart.service_uninstall()
+        print("Service removed." if ok else "Service was not installed.")
+    else:  # status
+        print(f"Service: {autostart.service_status()}")
+
+
 def cmd_set_animation(args):
     cfg = Config.load()
     cfg.show_send_animation = args.state == "on"
@@ -309,6 +327,16 @@ def build_parser() -> argparse.ArgumentParser:
     g = sub.add_parser("gui", help="open the desktop control-panel window")
     g.add_argument("--camera", type=int, default=0, help="camera index (default 0)")
     g.set_defaults(func=cmd_gui)
+
+    dm = sub.add_parser("daemon",
+                        help="run headless in the background (no window/tray)")
+    dm.add_argument("--camera", type=int, default=0, help="camera index (default 0)")
+    dm.set_defaults(func=cmd_daemon)
+
+    sv = sub.add_parser("service",
+                        help="install/remove the background service (auto-start on login)")
+    sv.add_argument("action", choices=("install", "uninstall", "status"))
+    sv.set_defaults(func=cmd_service)
 
     sg = sub.add_parser("set-gesture", help="choose gesture: two, grab or swipe")
     sg.add_argument("mode", choices=("swipe", "palm", "two", "grab", "canvas"))

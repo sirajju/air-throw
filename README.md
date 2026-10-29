@@ -301,6 +301,28 @@ airthrow autostart on    # off / status also available
 Windows adds a Startup shortcut; Linux adds `~/.config/autostart/airthrow.desktop`.
 Autostart launches the windowed `airthrow-tray` so nothing pops up but the icon.
 
+### Run as a background service (auto-start on login)
+
+For a managed, always-running background agent — installed and started with one
+command, auto-restarting, and launching on every login:
+
+```bash
+airthrow service install     # set it up and start it now
+airthrow service status      # check it
+airthrow service uninstall   # remove it
+```
+
+- **Linux** installs a **systemd user service** (`~/.config/systemd/user/airthrow.service`,
+  `Restart=on-failure`) and enables it with `systemctl --user`. No `sudo` needed.
+  To keep it running even before you log in: `loginctl enable-linger $USER`.
+- **Windows** installs a **hidden login agent** (the webcam and on-screen overlays
+  need your desktop session, so a session-0 Windows Service can't be used) and
+  launches it immediately in the background.
+
+Under the hood the service runs `airthrow daemon` — a **headless** mode (no
+window, no tray) that just receives and, if a webcam is present, watches for
+gestures. It works for both the standalone executables and a from-source install.
+
 ## Commands
 
 | Command | What it does |
@@ -308,6 +330,8 @@ Autostart launches the windowed `airthrow-tray` so nothing pops up but the icon.
 | `run [--camera N] [--debug]` | Foreground: camera + gestures + preview window |
 | `gui [--camera N]` | Open the desktop control-panel window |
 | `tray [--camera N]` | Background: run with a system-tray icon (no console) |
+| `daemon [--camera N]` | Headless background run (no window/tray) |
+| `service <install\|uninstall\|status>` | Background service, auto-start on login |
 | `set-gesture <swipe\|palm\|two\|grab\|canvas>` | Choose the gesture style (default swipe) |
 | `autostart <on\|off\|status>` | Start the tray app automatically on login |
 | `info` | Show this device's name, IP, port, settings and log path |

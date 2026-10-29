@@ -69,4 +69,5 @@ case ":$PATH:" in
 esac
 echo
 echo "Next:  airthrow info   |   airthrow gui   |   airthrow run"
+echo "Run in background on every login:  airthrow service install"
 echo "Update later: re-run this installer, or  git -C \"$DIR\" pull"

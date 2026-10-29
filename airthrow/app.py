@@ -649,3 +649,27 @@ def open_with_default_app(path: Path) -> None:
 
 def run(camera_index: int = 0, debug: bool = False):
     AirThrow(Config.load(), camera_index=camera_index, debug=debug).run()
+
+
+def run_daemon(camera_index: int = 0):
+    """Headless background run: receiver + gestures, no preview, no tray.
+    Stops cleanly on SIGINT/SIGTERM (so a service manager can stop it)."""
+    import signal
+
+    app = AirThrow(Config.load(), camera_index=camera_index)
+    stop = threading.Event()
+
+    def _handle(*_):
+        stop.set()
+
+    for name in ("SIGINT", "SIGTERM", "SIGBREAK"):
+        sig = getattr(signal, name, None)
+        if sig is not None:
+            try:
+                signal.signal(sig, _handle)
+            except (ValueError, OSError):
+                pass  # not on the main thread / unsupported
+
+    log.info("daemon starting (headless background)")
+    app.start_background(stop, lambda: False, lambda: None)
+    log.info("daemon stopped")

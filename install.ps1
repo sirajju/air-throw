@@ -51,4 +51,5 @@ if ($userPath -notlike "*$BinDir*") {
 Say "Installed to $Dir"
 Write-Host ""
 Write-Host "Next (in a new terminal):  airthrow info  |  airthrow gui  |  airthrow run"
+Write-Host "Run in background on every login:  airthrow service install"
 Write-Host "Update later: re-run this installer, or  git -C `"$Dir`" pull"
