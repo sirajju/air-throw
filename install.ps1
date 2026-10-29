@@ -37,7 +37,10 @@ $Py = Join-Path $Dir ".venv\Scripts\python.exe"
 $BinDir = Join-Path $env:LOCALAPPDATA "AirThrow\bin"
 New-Item -ItemType Directory -Force $BinDir | Out-Null
 $Cmd = Join-Path $BinDir "airthrow.cmd"
-"@echo off`r`n`"$Py`" -m airthrow %*" | Set-Content -Encoding ascii $Cmd
+# PYTHONPATH points at the repo so 'python -m airthrow' finds the package from
+# any directory (run from source, not pip-installed).
+"@echo off`r`nset `"PYTHONPATH=$Dir`"`r`n`"$Py`" -m airthrow %*" |
+    Set-Content -Encoding ascii $Cmd
 
 $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
 if ($userPath -notlike "*$BinDir*") {

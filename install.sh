@@ -55,7 +55,9 @@ mkdir -p "$HOME/.local/bin"
 LAUNCHER="$HOME/.local/bin/airthrow"
 cat > "$LAUNCHER" <<EOF
 #!/usr/bin/env bash
-exec "$DIR/.venv/bin/python" -m airthrow "\$@"
+# PYTHONPATH points at the repo so 'python -m airthrow' finds the package
+# from any working directory (it's run from source, not pip-installed).
+exec env PYTHONPATH="$DIR" "$DIR/.venv/bin/python" -m airthrow "\$@"
 EOF
 chmod +x "$LAUNCHER"
 
