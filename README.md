@@ -22,24 +22,35 @@ Four pieces work together:
 
 ## Install
 
-Three ways to run AirThrow: **download a prebuilt release** (easiest, no build),
-build a **standalone executable** yourself, or run **from source**.
+Two ways to run AirThrow: a **standalone executable** (no Python needed) or
+**from source**.
 
-### Option A — download a release (no build needed)
+### Prebuilt archives (build once, reuse — no rebuilding every time)
 
-Grab the latest binaries from the
-[**Releases**](https://github.com/sirajju/air-throw/releases) page:
+Package the binaries into a versioned archive you can copy to other machines and
+keep. Build each platform **once** on its own OS, then just reuse the archive:
 
-- **Windows** → `airthrow-windows-x64.zip` (contains `airthrow.exe`,
-  `airthrow-gui.exe`, `airthrow-tray.exe`)
-- **Linux** → `airthrow-linux-x64.tar.gz` (contains `airthrow`, `airthrow-gui`,
-  `airthrow-tray`)
+**Windows** → `release\airthrow-v<version>-windows-x64.zip`
+```powershell
+powershell -ExecutionPolicy Bypass -File package.ps1
+# already built dist\?  add -SkipBuild to just zip it
+```
 
-Unzip and run — no Python required. These are built automatically on GitHub's
-runners for every version tag (see `.github/workflows/release.yml`), so there's
-always a fresh download for both platforms.
+**Linux** → `release/airthrow-v<version>-linux-x64.tar.gz` (run on a Linux box)
+```bash
+./package-linux.sh
+```
 
-### Option B — build the standalone executable yourself
+**Linux archive from Windows, via local Docker** (no Linux box, no cloud):
+```bash
+docker build -f Dockerfile.linux -t airthrow-linux .
+docker run --rm -v "${PWD}/dist:/out" airthrow-linux   # -> ./dist/airthrow-v<ver>-linux-x64.tar.gz
+```
+
+Each archive holds all three programs (`airthrow`, `airthrow-gui`,
+`airthrow-tray`). Recipients just extract and run — no Python required.
+
+### Option A — build the standalone executable yourself
 
 Build a single-file executable for your OS (PyInstaller cannot cross-compile, so
 each binary is built on its own OS):
@@ -67,7 +78,7 @@ docker run --rm -v "${PWD}/dist:/out" airthrow-linux   # -> ./dist/airthrow
 Then use the binary exactly like the commands below, e.g.
 `airthrow.exe info` / `./airthrow run`.
 
-### Option C — from source
+### Option B — from source
 
 ```bash
 pip install -r requirements.txt

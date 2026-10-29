@@ -3,6 +3,7 @@ build/
 build_*/
 dist/
 dist_*/
+release/
 *.manifest
 
 # Python

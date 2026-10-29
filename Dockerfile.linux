@@ -19,5 +19,6 @@ RUN pip install --no-cache-dir -r requirements.txt pyinstaller
 COPY . .
 RUN pyinstaller --clean -y airthrow.spec
 
-# On `docker run` with -v ./dist:/out, drop the built binary into the host.
-CMD ["sh", "-c", "cp -v dist/airthrow /out/airthrow && echo 'Linux binary -> ./dist/airthrow'"]
+# On `docker run` with -v ./dist:/out, drop a ready archive of all three Linux
+# binaries into the host (./dist/airthrow-v<version>-linux-x64.tar.gz).
+CMD ["sh", "-c", "V=$(python -c 'import airthrow,sys;sys.stdout.write(airthrow.__version__)'); tar -czf /out/airthrow-v$V-linux-x64.tar.gz -C dist airthrow airthrow-gui airthrow-tray && echo \"Linux archive -> ./dist/airthrow-v$V-linux-x64.tar.gz\""]
