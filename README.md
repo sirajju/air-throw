@@ -80,10 +80,28 @@ Then use the binary exactly like the commands below, e.g.
 
 ### Option B — from source
 
+Use a **virtual environment** so pip never touches system packages. On modern
+Linux (Debian/Ubuntu/Fedora) installing into the system Python fails with
+*"externally-managed-environment / this will break system packages"* (PEP 668) —
+a venv is the clean fix (and the `build-linux.sh` / `package-linux.sh` scripts
+create one for you automatically):
+
 ```bash
+python3 -m venv .venv          # Linux/macOS
+source .venv/bin/activate
 pip install -r requirements.txt
 python -m airthrow info
 ```
+
+```powershell
+py -m venv .venv               # Windows
+.\.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+python -m airthrow info
+```
+
+If `python3 -m venv` fails on Debian/Ubuntu, install it once:
+`sudo apt install python3-venv`.
 
 **Sending** needs a **webcam** (that's how you gesture). **Receiving** does not —
 a machine with no camera runs in *receive-only* mode and can still accept throws.
