@@ -63,11 +63,20 @@ chmod +x "$LAUNCHER"
 
 say "Installed to $DIR"
 say "Launcher: $LAUNCHER"
+
+# --- background service (auto-start on login) --------------------------------
+# On by default; set AIRTHROW_NO_SERVICE=1 to skip.
+if [ -z "${AIRTHROW_NO_SERVICE:-}" ]; then
+    say "Enabling background service (auto-start on login)..."
+    "$LAUNCHER" service install || \
+        echo "  (couldn't enable the service — run 'airthrow service install' later)"
+fi
+
 case ":$PATH:" in
     *":$HOME/.local/bin:"*) ;;
     *) echo "   Add this to your shell profile:  export PATH=\"\$HOME/.local/bin:\$PATH\"" ;;
 esac
 echo
 echo "Next:  airthrow info   |   airthrow gui   |   airthrow run"
-echo "Run in background on every login:  airthrow service install"
+echo "Background service:  airthrow service status | uninstall"
 echo "Update later: re-run this installer, or  git -C \"$DIR\" pull"

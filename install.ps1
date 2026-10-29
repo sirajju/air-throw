@@ -49,7 +49,15 @@ if ($userPath -notlike "*$BinDir*") {
 }
 
 Say "Installed to $Dir"
+
+# --- background service (auto-start on login) --------------------------------
+# On by default; set $env:AIRTHROW_NO_SERVICE = "1" to skip.
+if (-not $env:AIRTHROW_NO_SERVICE) {
+    Say "Enabling background service (auto-start on login)..."
+    try { & $Cmd service install } catch { Write-Host "  (run 'airthrow service install' later)" }
+}
+
 Write-Host ""
 Write-Host "Next (in a new terminal):  airthrow info  |  airthrow gui  |  airthrow run"
-Write-Host "Run in background on every login:  airthrow service install"
+Write-Host "Background service:  airthrow service status | uninstall"
 Write-Host "Update later: re-run this installer, or  git -C `"$Dir`" pull"
