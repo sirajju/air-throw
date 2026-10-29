@@ -42,7 +42,9 @@ class Config:
     listen_port: int = DEFAULT_PORT
     # How far the hand must travel (fraction of frame width) to count as a
     # swipe. Lower = easier to trigger. Tunable with `set-sensitivity`.
-    swipe_min_distance: float = 0.22
+    # 0.22 was too strict (a normal flick travels ~0.12-0.16 of the frame),
+    # so swipes were detected but never crossed the line to fire.
+    swipe_min_distance: float = 0.14
     # Open a received image in the default viewer as soon as it arrives.
     auto_open: bool = True
     # Block re-sending the same file to the same peer within this many seconds.
@@ -81,7 +83,7 @@ class Config:
         return cls(
             device_name=raw.get("device_name", socket.gethostname()),
             listen_port=raw.get("listen_port", DEFAULT_PORT),
-            swipe_min_distance=float(raw.get("swipe_min_distance", 0.22)),
+            swipe_min_distance=float(raw.get("swipe_min_distance", 0.14)),
             auto_open=bool(raw.get("auto_open", True)),
             resend_block_seconds=float(raw.get("resend_block_seconds", 10.0)),
             gesture_mode=raw.get("gesture_mode", "swipe"),
