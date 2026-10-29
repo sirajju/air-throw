@@ -27,15 +27,21 @@ from .transfer import check_peer
 
 log = get_logger()
 
-# Palette (dark, matches the send border's teal accent).
-BG = "#1b1d23"
-CARD = "#23262e"
-FG = "#e6e8ee"
-MUTED = "#9aa0ad"
-ACCENT = "#00e5c8"
-OK = "#39d353"
-WARN = "#ffb020"
-ERR = "#ff5d6c"
+# Palette — light, Apple-like: soft grey canvas, white cards, hairline borders,
+# system-blue accent, lots of whitespace.
+BG = "#f5f5f7"        # window background
+CARD = "#ffffff"      # card surface
+BORDER = "#e4e4e9"    # hairline border
+FG = "#1d1d1f"        # primary text (near-black)
+MUTED = "#86868b"     # secondary text
+ACCENT = "#0071e3"    # system blue
+ACCENT_HOVER = "#0077ed"
+FIELD = "#f2f2f5"     # input / secondary-button fill
+FIELD_HOVER = "#e7e7ec"
+OK = "#1f9d4d"
+WARN = "#c77700"
+ERR = "#d7263d"
+FONT = "Segoe UI"     # clean system sans (falls back on Linux)
 
 
 class GUI:
@@ -51,7 +57,8 @@ class GUI:
         self.root = tk.Tk()
         self.root.title("AirThrow")
         self.root.configure(bg=BG)
-        self.root.minsize(460, 640)
+        self.root.minsize(440, 560)
+        self.root.geometry("480x720")
         self._build_styles()
 
         # Tk variables bound to settings.
@@ -85,46 +92,89 @@ class GUI:
             style.theme_use("clam")
         except tk.TclError:
             pass
-        style.configure(".", background=BG, foreground=FG, fieldbackground=CARD,
-                        bordercolor=CARD, font=("Segoe UI", 10))
-        style.configure("Card.TFrame", background=CARD)
+        style.configure(".", background=BG, foreground=FG, fieldbackground=FIELD,
+                        bordercolor=BORDER, font=(FONT, 10))
+        # Cards: white surface, hairline border.
+        style.configure("Card.TFrame", background=CARD, borderwidth=1,
+                        relief="solid", bordercolor=BORDER)
+        style.configure("TFrame", background=BG)
         style.configure("TLabel", background=BG, foreground=FG)
         style.configure("Card.TLabel", background=CARD, foreground=FG)
         style.configure("Muted.TLabel", background=CARD, foreground=MUTED)
-        style.configure("Head.TLabel", background=BG, foreground=ACCENT,
-                        font=("Segoe UI Semibold", 11))
-        style.configure("TButton", background="#2d313b", foreground=FG,
-                        borderwidth=0, focuscolor=CARD, padding=6)
-        style.map("TButton", background=[("active", "#3a3f4b")])
-        style.configure("Accent.TButton", background=ACCENT, foreground="#06231f",
-                        font=("Segoe UI Semibold", 10), padding=8)
-        style.map("Accent.TButton", background=[("active", "#28efd6")])
-        style.configure("TEntry", fieldbackground="#2d313b", foreground=FG,
-                        insertcolor=FG, borderwidth=0, padding=4)
-        style.configure("TCombobox", fieldbackground="#2d313b", foreground=FG,
-                        arrowcolor=FG, padding=4)
+        style.configure("Head.TLabel", background=BG, foreground=MUTED,
+                        font=(FONT, 10, "bold"))
+        # Secondary button: light grey pill.
+        style.configure("TButton", background=FIELD, foreground=FG,
+                        borderwidth=0, focuscolor=CARD, padding=(12, 7),
+                        font=(FONT, 10))
+        style.map("TButton", background=[("active", FIELD_HOVER),
+                                         ("pressed", FIELD_HOVER)])
+        # Primary button: system blue.
+        style.configure("Accent.TButton", background=ACCENT, foreground="#ffffff",
+                        font=(FONT, 10, "bold"), padding=(16, 9), borderwidth=0)
+        style.map("Accent.TButton", background=[("active", ACCENT_HOVER),
+                                                ("pressed", ACCENT_HOVER)])
+        style.configure("TEntry", fieldbackground=FIELD, foreground=FG,
+                        insertcolor=FG, borderwidth=0, padding=6)
+        style.configure("TSpinbox", fieldbackground=FIELD, foreground=FG,
+                        arrowcolor=FG, borderwidth=0, padding=4)
+        style.configure("TCombobox", fieldbackground=FIELD, foreground=FG,
+                        arrowcolor=MUTED, borderwidth=0, padding=5)
+        style.map("TCombobox", fieldbackground=[("readonly", FIELD)])
         style.configure("TCheckbutton", background=CARD, foreground=FG)
         style.map("TCheckbutton", background=[("active", CARD)])
-        style.configure("Horizontal.TScale", background=CARD)
+        style.configure("Horizontal.TScale", background=CARD, troughcolor=FIELD,
+                        borderwidth=0)
+        style.configure("Vertical.TScrollbar", background=BORDER, troughcolor=BG,
+                        borderwidth=0, arrowcolor=MUTED)
+        style.map("Vertical.TScrollbar", background=[("active", MUTED)])
 
     def _card(self, parent, title) -> ttk.Frame:
-        ttk.Label(parent, text=title, style="Head.TLabel").pack(
-            anchor="w", padx=4, pady=(12, 4))
-        frame = ttk.Frame(parent, style="Card.TFrame", padding=12)
-        frame.pack(fill="x", padx=2)
+        ttk.Label(parent, text=title.upper(), style="Head.TLabel").pack(
+            anchor="w", padx=6, pady=(16, 6))
+        frame = ttk.Frame(parent, style="Card.TFrame", padding=16)
+        frame.pack(fill="x")
         return frame
 
     # ---- layout ------------------------------------------------------
     def _build_ui(self):
-        outer = ttk.Frame(self.root, padding=12)
-        outer.pack(fill="both", expand=True)
+        # Pinned status bar at the bottom (outside the scroll area).
+        bar = tk.Frame(self.root, bg="#ffffff", highlightthickness=1,
+                       highlightbackground=BORDER)
+        bar.pack(side="bottom", fill="x")
+        self.status_lbl = tk.Label(bar, text="  ●  Idle", bg="#ffffff",
+                                   fg=MUTED, anchor="w", font=(FONT, 10),
+                                   padx=10, pady=8)
+        self.status_lbl.pack(fill="x")
 
+        # Scrollable body.
+        body = tk.Frame(self.root, bg=BG)
+        body.pack(side="top", fill="both", expand=True)
+        canvas = tk.Canvas(body, bg=BG, highlightthickness=0)
+        vsb = ttk.Scrollbar(body, orient="vertical", command=canvas.yview)
+        canvas.configure(yscrollcommand=vsb.set)
+        vsb.pack(side="right", fill="y")
+        canvas.pack(side="left", fill="both", expand=True)
+        outer = ttk.Frame(canvas, padding=(18, 4, 18, 18))
+        self._scroll_window = canvas.create_window((0, 0), window=outer,
+                                                   anchor="nw")
+        self._scroll_canvas = canvas
+
+        outer.bind("<Configure>",
+                   lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas.bind("<Configure>",
+                    lambda e: canvas.itemconfigure(self._scroll_window,
+                                                   width=e.width))
+        self._bind_mousewheel(canvas)
+
+        # Header -------------------------------------------------------
         header = ttk.Frame(outer)
-        header.pack(fill="x")
-        ttk.Label(header, text="AirThrow", font=("Segoe UI Semibold", 18),
-                  foreground=ACCENT).pack(side="left")
-        ttk.Label(header, text=f"v{__version__}", style="Muted.TLabel",
-                  foreground=MUTED).pack(side="left", padx=8)
+        header.pack(fill="x", pady=(10, 2))
+        ttk.Label(header, text="AirThrow", font=(FONT, 22, "bold"),
+                  foreground=FG).pack(side="left")
+        ttk.Label(header, text=f"v{__version__}", style="TLabel",
+                  foreground=MUTED, font=(FONT, 11)).pack(side="left", padx=8,
+                                                          pady=(10, 0))
 
         # This device --------------------------------------------------
         dev = self._card(outer, "This device")
@@ -134,7 +184,7 @@ class GUI:
                                                       expand=True, padx=6)
         ttk.Button(row, text="Save", command=self._save_name).pack(side="left")
         self.addr_lbl = ttk.Label(
-            dev, text=self._addr_text(), style="Muted.TLabel")
+            dev, text=self._addr_text(), style="Muted.TLabel", wraplength=400)
         self.addr_lbl.pack(anchor="w", pady=(8, 0))
 
         # Peers --------------------------------------------------------
@@ -144,10 +194,11 @@ class GUI:
 
         # Extra devices (threshold+ enables the picker) ----------------
         dev2 = self._card(outer, "More devices  (picker appears at the threshold)")
-        self.dev_list = tk.Listbox(dev2, height=4, bg="#2d313b", fg=FG,
-                                   borderwidth=0, highlightthickness=0,
-                                   selectbackground=ACCENT, selectforeground="#06231f",
-                                   activestyle="none")
+        self.dev_list = tk.Listbox(dev2, height=4, bg=FIELD, fg=FG,
+                                   borderwidth=0, highlightthickness=1,
+                                   highlightbackground=BORDER, relief="flat",
+                                   selectbackground=ACCENT, selectforeground="#ffffff",
+                                   activestyle="none", font=(FONT, 10))
         self.dev_list.pack(fill="x")
         addrow = ttk.Frame(dev2, style="Card.TFrame"); addrow.pack(fill="x", pady=(6, 0))
         self.v_dev_name = tk.StringVar(); self.v_dev_ip = tk.StringVar()
@@ -174,12 +225,12 @@ class GUI:
         grow = ttk.Frame(beh, style="Card.TFrame"); grow.pack(fill="x")
         ttk.Label(grow, text="Gesture", style="Card.TLabel", width=10).pack(side="left")
         cb = ttk.Combobox(grow, textvariable=self.v_gesture, state="readonly",
-                          values=("palm", "two", "grab", "swipe"), width=10)
+                          values=("swipe", "palm", "two", "grab", "canvas"),
+                          width=10)
         cb.pack(side="left", padx=6)
         cb.bind("<<ComboboxSelected>>", lambda e: self._save_settings())
-        ttk.Label(grow, text="(palm = hold open hand to a side)",
-                  style="Muted.TLabel").pack(
-            side="left")
+        ttk.Label(grow, text="(swipe = flick · canvas = map)",
+                  style="Muted.TLabel").pack(side="left")
 
         srow = ttk.Frame(beh, style="Card.TFrame"); srow.pack(fill="x", pady=(8, 0))
         ttk.Label(srow, text="Sensitivity", style="Card.TLabel", width=10).pack(side="left")
@@ -232,10 +283,13 @@ class GUI:
         ttk.Button(arow, text="Open log", command=self._open_log).pack(
             side="left", padx=6)
 
-        # Status bar ---------------------------------------------------
-        self.status_lbl = ttk.Label(outer, text="●  Idle", style="Muted.TLabel",
-                                    anchor="w")
-        self.status_lbl.pack(fill="x", pady=(14, 0))
+    def _bind_mousewheel(self, canvas):
+        def on_wheel(e):
+            delta = e.delta
+            canvas.yview_scroll(int(-delta / 120) if delta else 0, "units")
+        canvas.bind_all("<MouseWheel>", on_wheel)             # Windows / macOS
+        canvas.bind_all("<Button-4>", lambda e: canvas.yview_scroll(-1, "units"))
+        canvas.bind_all("<Button-5>", lambda e: canvas.yview_scroll(1, "units"))
 
     def _peer_row(self, parent, slot: str):
         n, ip, port = self.v_peer[slot]
@@ -347,8 +401,8 @@ class GUI:
     def _build_canvas_card(self, outer):
         card = self._card(outer, "Canvas map  (place each device by its direction)")
         self.CW, self.CH = 320, 220
-        self.map_cv = tk.Canvas(card, width=self.CW, height=self.CH, bg="#15171c",
-                                highlightthickness=1, highlightbackground="#2a2e37")
+        self.map_cv = tk.Canvas(card, width=self.CW, height=self.CH, bg=FIELD,
+                                highlightthickness=1, highlightbackground=BORDER)
         self.map_cv.pack()
         self.map_cv.bind("<Button-1>", self._map_press)
         self.map_cv.bind("<B1-Motion>", self._map_drag)
@@ -372,19 +426,19 @@ class GUI:
         cx, cy = self.CW / 2, self.CH / 2
         for r in (0.18, 0.32):
             rr = r * min(self.CW, self.CH)
-            c.create_oval(cx - rr, cy - rr, cx + rr, cy + rr, outline="#2a2e37")
+            c.create_oval(cx - rr, cy - rr, cx + rr, cy + rr, outline="#dcdce2")
         targets = self.config.all_devices()
         self._dot_hit = []
         for i, p in enumerate(targets):
             x, y = self._map_target_pos(p, i, len(targets))
             px, py = x * self.CW, y * self.CH
-            c.create_line(cx, cy, px, py, fill="#3a3f4b")
-            c.create_oval(px - 9, py - 9, px + 9, py + 9, fill="#00e5c8", outline="")
-            c.create_text(px, py - 14, text=p.name, fill="#e6e8ee",
-                          font=("Segoe UI", 9))
+            c.create_line(cx, cy, px, py, fill="#c7c7cf")
+            c.create_oval(px - 9, py - 9, px + 9, py + 9, fill=ACCENT, outline="")
+            c.create_text(px, py - 14, text=p.name, fill=FG,
+                          font=(FONT, 9, "bold"))
             self._dot_hit.append((p.name, px, py))
-        c.create_oval(cx - 8, cy - 8, cx + 8, cy + 8, fill="#ff5d9e", outline="#fff")
-        c.create_text(cx, cy + 18, text="YOU", fill="#ffb3d1", font=("Segoe UI", 9))
+        c.create_oval(cx - 8, cy - 8, cx + 8, cy + 8, fill="#ff2d55", outline="#fff")
+        c.create_text(cx, cy + 18, text="YOU", fill="#ff2d55", font=(FONT, 9, "bold"))
 
     def _map_press(self, e):
         for name, px, py in self._dot_hit:
@@ -502,12 +556,12 @@ class GUI:
     # ---- status ------------------------------------------------------
     def _flash_status(self, text: str, color=FG):
         if hasattr(self, "status_lbl"):  # may fire during UI construction
-            self.status_lbl.configure(text=f"●  {text}", foreground=color)
+            self.status_lbl.configure(text=f"  ●  {text}", fg=color)
 
     def _poll_status(self):
         if self.running and self.app:
-            self.status_lbl.configure(text=f"●  {self.app.status}",
-                                      foreground=ACCENT)
+            self.status_lbl.configure(text=f"  ●  {self.app.status}",
+                                      fg=ACCENT)
         self.root.after(500, self._poll_status)
 
     def _on_close(self):
