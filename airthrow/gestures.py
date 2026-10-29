@@ -112,10 +112,12 @@ class BaseHandDetector:
         # Live telemetry for the debug overlay / logs (updated each frame).
         self.hand_present = False
         self.palm_x: float | None = None
+        self.palm_y: float | None = None
         self.cur_dx = 0.0
         self.cur_dt = 0.0
         self.grabbed = False      # set by GrabDetector; always False for swipe
         self.fingers = 0
+        self.open_hand = False    # True while the hand is an open palm
 
         options = vision.HandLandmarkerOptions(
             base_options=mp_python.BaseOptions(
@@ -153,13 +155,17 @@ class BaseHandDetector:
             lm = result.hand_landmarks[0]
             self.hand_present = True
             self.palm_x = lm[9].x
+            self.palm_y = lm[9].y
             self.fingers = extended_finger_count(lm)
+            self.open_hand = is_open_hand(lm)
             direction = self._update(lm, now)
             colour = (0, 220, 0) if self.grabbed else (0, 220, 255)
             _draw_hand(frame_bgr, lm, colour)
         else:
             self.hand_present = False
             self.palm_x = None
+            self.palm_y = None
+            self.open_hand = False
             self.cur_dx = 0.0
             self.cur_dt = 0.0
             self.fingers = 0
@@ -332,6 +338,15 @@ class PalmReachDetector(BaseHandDetector):
             log.info("PALM reach %s (held open hand in %s zone)", zone, zone)
             self.on_swipe(zone)
             return zone
+        return None
+
+
+class CanvasDetector(BaseHandDetector):
+    """Just tracks the open hand's position — the app turns the hand's direction
+    from screen centre into a pick on the canvas map (see AirThrow._canvas_tick).
+    Kept as its own class so `process()` has a concrete (no-op) `_update`."""
+
+    def _update(self, lm, now: float):
         return None
 
 

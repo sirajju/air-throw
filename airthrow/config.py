@@ -25,6 +25,10 @@ class Peer:
     name: str
     ip: str
     port: int = DEFAULT_PORT
+    # Position on the "canvas" map (normalised 0..1, centre 0.5,0.5 = you).
+    # None until placed in the canvas editor. Used by the canvas gesture.
+    x: float | None = None
+    y: float | None = None
 
     def url(self) -> str:
         return f"http://{self.ip}:{self.port}"
@@ -43,9 +47,10 @@ class Config:
     auto_open: bool = True
     # Block re-sending the same file to the same peer within this many seconds.
     resend_block_seconds: float = 10.0
-    # Gesture mode: "palm" (hold open hand to a side — most reliable), "two"
-    # (two-finger swipe), "grab" (fist pick-and-throw), or "swipe" (flick).
-    gesture_mode: str = "palm"
+    # Gesture mode: "swipe" (whole-hand flick, default), "palm" (hold open hand
+    # to a side), "two" (two-finger swipe), "grab" (fist pick-and-throw), or
+    # "canvas" (swipe toward a peer on a map you lay out).
+    gesture_mode: str = "swipe"
     # Flash an animated gradient border around the sent window on each throw.
     show_send_animation: bool = True
     # Which border style to use (see send_overlay.STYLES): aurora/rainbow/...
@@ -79,7 +84,7 @@ class Config:
             swipe_min_distance=float(raw.get("swipe_min_distance", 0.22)),
             auto_open=bool(raw.get("auto_open", True)),
             resend_block_seconds=float(raw.get("resend_block_seconds", 10.0)),
-            gesture_mode=raw.get("gesture_mode", "palm"),
+            gesture_mode=raw.get("gesture_mode", "swipe"),
             show_send_animation=bool(raw.get("show_send_animation", True)),
             send_animation_style=raw.get("send_animation_style", "aurora"),
             peers=peers,
@@ -154,6 +159,22 @@ class Config:
         """True when there are at least `picker_threshold` devices, so a swipe
         should open the picker instead of sending straight to a left/right slot."""
         return len(self.all_devices()) >= max(2, self.picker_threshold)
+
+    # ---- canvas map ----------------------------------------------------
+    def positioned_targets(self) -> list[Peer]:
+        """Devices that have been placed on the canvas map (have x,y)."""
+        return [p for p in self.all_devices()
+                if p.x is not None and p.y is not None]
+
+    def set_position(self, name: str, x: float, y: float) -> bool:
+        """Place the peer/device named `name` at (x,y) on the map (0..1)."""
+        hit = False
+        for peer in list(self.peers.values()) + self.devices:
+            if peer.name == name:
+                peer.x, peer.y = x, y
+                hit = True
+        self.save()
+        return hit
 
 
 def local_ip() -> str:

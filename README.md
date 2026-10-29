@@ -231,17 +231,25 @@ Press `q` or `Esc` to quit.
 
 ### Gestures
 
-Four modes (`set-gesture palm|two|grab|swipe`, default **palm**):
+Five modes (`set-gesture swipe|palm|two|grab|canvas`, default **swipe**). All
+need only a normal RGB webcam — **no IR or depth sensor**.
 
-- **palm** (hold-to-side, default — **most reliable**): hold your **open hand**
-  in the **left or right third** of the camera view for about half a second. No
-  fast motion and no finger pose to nail, so it works on cheap webcams and in
-  poor light where a timed flick keeps missing. The preview shades the two
-  "hold here" zones and fills them as you dwell. This needs only a normal RGB
-  webcam — **no IR or depth sensor**.
+- **swipe** (default): **flick** your whole hand left or right. Simplest; fires
+  on any fast horizontal motion.
+- **palm** (hold-to-side — **most forgiving**): hold your **open hand** in the
+  **left or right third** of the view for about half a second. No fast motion and
+  no finger pose to nail, so it works on cheap webcams and in poor light where a
+  timed flick keeps missing. The preview shades the two zones and fills them as
+  you hold.
+- **canvas** (map — for **many devices in any direction**): lay out your devices
+  on a 2-D map in the GUI (*Canvas map* card — drag each one to where that
+  computer actually is, you're at the centre). Then reach your **open hand toward
+  a device's direction**; a map pops up, highlights the device you're pointing
+  at, and **hold** to send. Works for any number of devices at any angle, not
+  just left/right.
 - **two** (two-finger swipe): hold up **two fingers** (index + middle, the
   "peace" sign) and **flick** left or right. The pose must be held through the
-  whole motion, so stray hand movement won't fire — quick but fussier than palm.
+  whole motion, so stray hand movement won't fire — quick but fussier than swipe.
 - **grab** (Huawei-style): make a **fist** to *pick up* the open image (overlay
   shows "Picked up …"), move toward the target, then **open your hand** to
   release/send. Opening without moving far enough cancels.
@@ -279,7 +287,7 @@ Autostart launches the windowed `airthrow-tray` so nothing pops up but the icon.
 | `run [--camera N] [--debug]` | Foreground: camera + gestures + preview window |
 | `gui [--camera N]` | Open the desktop control-panel window |
 | `tray [--camera N]` | Background: run with a system-tray icon (no console) |
-| `set-gesture <palm\|two\|grab\|swipe>` | Choose the gesture style (default palm-reach) |
+| `set-gesture <swipe\|palm\|two\|grab\|canvas>` | Choose the gesture style (default swipe) |
 | `autostart <on\|off\|status>` | Start the tray app automatically on login |
 | `info` | Show this device's name, IP, port, settings and log path |
 | `set-sensitivity <d>` | Swipe travel needed to fire, 0.05 (easy) .. 0.9 (hard) |

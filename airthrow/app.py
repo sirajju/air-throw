@@ -12,6 +12,7 @@ toggled on demand and stopping via a shared Event.
 
 from __future__ import annotations
 
+import math
 import os
 import subprocess
 import sys
@@ -24,8 +25,8 @@ import cv2
 from . import send_overlay, transfer
 from .config import Config, local_ip
 from .foreground_image import current_image, foreground_rect, foreground_window
-from .gestures import (BaseHandDetector, GrabDetector, PalmReachDetector,
-                       SwipeDetector, TwoFingerDetector)
+from .gestures import (BaseHandDetector, CanvasDetector, GrabDetector,
+                       PalmReachDetector, SwipeDetector, TwoFingerDetector)
 from .logs import LOG_PATH, get_logger
 
 log = get_logger()
@@ -33,6 +34,19 @@ log = get_logger()
 WINDOW_NAME = "AirThrow"
 POLL_EVERY = 8  # frames between foreground-image checks (~3-4x/sec)
 PICKER_CONFIRM_DELAY = 1.8  # seconds of no swipe before the picker auto-sends
+
+# Canvas (map) gesture tuning.
+CANVAS_AIM_MIN_MAG = 0.12     # how far the hand must be off-centre to aim
+CANVAS_MAX_ANGLE_DEG = 55     # hand must point within this of a device
+CANVAS_DWELL = 0.6            # hold the aim this long to send
+CANVAS_GRACE_FRAMES = 6       # tolerate this many hand-less frames before hiding
+CANVAS_COOLDOWN = 1.5         # min gap between canvas sends
+
+
+def _angle_diff(a: float, b: float) -> float:
+    """Smallest signed difference between two angles (radians), in [-pi, pi]."""
+    d = (a - b + math.pi) % (2 * math.pi) - math.pi
+    return d
 
 
 def open_camera(index: int):
@@ -90,6 +104,14 @@ class AirThrow:
         self._picker_image: Path | None = None
         self._picker_rect: tuple[int, int, int, int] | None = None
         self._picker_timer: threading.Timer | None = None
+
+        # Canvas (map) gesture state.
+        self._canvas_shown = False
+        self._canvas_targets: list = []
+        self._canvas_aim = -1
+        self._canvas_since = 0.0
+        self._canvas_last_fire = 0.0
+        self._canvas_miss = 0
         self.status = "Ready"
         self.status_color = (255, 255, 255)
         self.status_until = 0.0
@@ -210,6 +232,75 @@ class AirThrow:
         log.info("picker confirmed -> %s", device.name)
         self._throw_to_peer(device, image, rect, ">>", direction="right")
 
+    # ---- canvas (map) gesture ---------------------------------------
+    def _canvas_tick(self):
+        """Per-frame: show the map when the open hand is up, highlight the device
+        your hand points toward (angle from screen centre), and send after a
+        short hold. The map is debounced — a brief hand loss won't close it."""
+        det = self.detector
+        targets = self.config.positioned_targets()
+        if not targets:
+            if det and det.hand_present:
+                self.set_status("Canvas: place devices on the map (GUI canvas)",
+                                (0, 180, 255))
+            return
+
+        now = time.time()
+        if not det.hand_present or not det.open_hand:
+            self._canvas_miss += 1
+            if self._canvas_miss > CANVAS_GRACE_FRAMES and self._canvas_shown:
+                send_overlay.radar_hide()
+                self._canvas_shown = False
+                self._canvas_aim = -1
+            return
+        self._canvas_miss = 0
+
+        if not self._canvas_shown:
+            self._canvas_targets = targets
+            send_overlay.radar_show([(p.name, p.x, p.y) for p in targets],
+                                    "Reach toward a device")
+            self._canvas_shown = True
+            self._canvas_aim = -1
+
+        px, py = det.palm_x, det.palm_y
+        if px is None or py is None:
+            return
+        dx, dy = px - 0.5, py - 0.5
+        if (dx * dx + dy * dy) ** 0.5 < CANVAS_AIM_MIN_MAG:
+            if self._canvas_aim != -1:
+                self._canvas_aim = -1
+                send_overlay.radar_set(-1)
+            self._canvas_since = now
+            return
+
+        hand_ang = math.atan2(dy, dx)
+        best, best_diff = -1, math.pi
+        for i, p in enumerate(self._canvas_targets):
+            t_ang = math.atan2(p.y - 0.5, p.x - 0.5)
+            diff = abs(_angle_diff(hand_ang, t_ang))
+            if diff < best_diff:
+                best, best_diff = i, diff
+        if best_diff > math.radians(CANVAS_MAX_ANGLE_DEG):
+            best = -1
+
+        if best != self._canvas_aim:
+            self._canvas_aim = best
+            self._canvas_since = now
+            send_overlay.radar_set(best)
+            return
+        if best < 0 or now - self._canvas_last_fire < CANVAS_COOLDOWN:
+            return
+        if now - self._canvas_since >= CANVAS_DWELL:
+            target = self._canvas_targets[best]
+            self._canvas_last_fire = now
+            self._canvas_aim = -1
+            self._canvas_shown = False
+            send_overlay.radar_hide()
+            direction = "left" if target.x < 0.5 else "right"
+            log.info("canvas send -> %s", target.name)
+            self._throw_to_peer(target, self.last_image, self.last_image_rect,
+                                ">>", direction=direction)
+
     def _do_throw(self, direction: str, image: Path | None,
                   rect: tuple[int, int, int, int] | None = None):
         peer = self.config.peer_for(direction)
@@ -281,10 +372,12 @@ class AirThrow:
                                 on_cancel=self.on_cancel, min_distance=dist)
         if mode == "two":
             return TwoFingerDetector(on_swipe=self.on_throw, min_distance=dist)
-        if mode == "swipe":
-            return SwipeDetector(on_swipe=self.on_throw, min_distance=dist)
-        # Default: palm-reach (hold open hand to a side) — most reliable.
-        return PalmReachDetector(on_swipe=self.on_throw, min_distance=dist)
+        if mode == "palm":
+            return PalmReachDetector(on_swipe=self.on_throw, min_distance=dist)
+        if mode == "canvas":
+            return CanvasDetector(min_distance=dist)
+        # Default: whole-hand swipe (flick left/right).
+        return SwipeDetector(on_swipe=self.on_throw, min_distance=dist)
 
     # ---- entry points ------------------------------------------------
     def run(self):
@@ -322,14 +415,32 @@ class AirThrow:
         log.info("camera %d open via %s; gesture=%s; sensitivity=%.2f",
                  self.camera_index, backend, self.config.gesture_mode,
                  self.config.swipe_min_distance)
+        # Detect the foreground image on its own thread: psutil.open_files() is
+        # slow on Windows (worse right after a window switch) and would stall the
+        # camera loop, making the preview stutter/freeze. Off-thread keeps it smooth.
+        fg = threading.Thread(target=self._foreground_worker,
+                              name="airthrow-foreground", daemon=True)
+        fg.start()
         try:
             self._camera_loop(cap)
         finally:
+            if self._canvas_shown:
+                send_overlay.radar_hide()
+                self._canvas_shown = False
             if self.detector:
                 self.detector.close()
             cap.release()
             cv2.destroyAllWindows()
+            fg.join(timeout=1)
             log.info("stopped")
+
+    def _foreground_worker(self):
+        while not self._stop.is_set():
+            try:
+                self._refresh_foreground_image()
+            except Exception as exc:
+                log.debug("foreground poll failed: %s", exc)
+            self._stop.wait(0.3)
 
     def _camera_loop(self, cap):
         frame_no = 0
@@ -354,12 +465,11 @@ class AirThrow:
             read_fails = 0
             frame = cv2.flip(frame, 1)  # mirror: feels natural
             self._update_fps()
-
             frame_no += 1
-            if frame_no % POLL_EVERY == 0:
-                self._refresh_foreground_image()
 
             frame, _ = self.detector.process(frame)
+            if self.config.gesture_mode == "canvas":
+                self._canvas_tick()
 
             if self._preview_fn():
                 if not window_open:

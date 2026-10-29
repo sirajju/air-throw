@@ -402,6 +402,92 @@ class _Selector:
             pass
 
 
+class _Radar:
+    """The canvas 'map': YOU at centre, each device at the position you placed it.
+    The app highlights whichever device your hand points toward. Stays up until
+    hidden (debounced by the app), so it doesn't blink with a flickery hand."""
+
+    def __init__(self, manager, root, targets, title):
+        self._mgr = manager
+        self._root = root
+        self._targets = targets  # list of (name, x, y) in 0..1
+        self._index = -1
+
+        import tkinter as tk
+        self._tk = tk
+        sw, sh = root.winfo_screenwidth(), root.winfo_screenheight()
+        self._w = int(sw * 0.62)
+        self._h = int(sh * 0.62)
+        px, py = (sw - self._w) // 2, (sh - self._h) // 2
+
+        self._win = tk.Toplevel(root)
+        self._win.overrideredirect(True)
+        self._win.attributes("-topmost", True)
+        try:
+            self._win.attributes("-alpha", 0.95)
+        except tk.TclError:
+            pass
+        self._win.geometry(f"{self._w}x{self._h}+{px}+{py}")
+        self._cv = tk.Canvas(self._win, width=self._w, height=self._h,
+                             bg="#15171c", highlightthickness=2,
+                             highlightbackground="#00e5c8")
+        self._cv.pack(fill="both", expand=True)
+        _make_click_through(self._win)
+        self._title = title
+        self._redraw()
+
+    def _pt(self, x, y):
+        pad = 70
+        cx = pad + x * (self._w - 2 * pad)
+        cy = pad + y * (self._h - 2 * pad)
+        return cx, cy
+
+    def set_index(self, index):
+        self._index = index
+        self._redraw()
+
+    def _redraw(self):
+        c = self._cv
+        c.delete("all")
+        cx, cy = self._w / 2, self._h / 2
+        c.create_text(self._w / 2, 28, text=self._title, fill="#00e5c8",
+                      font=("Segoe UI Semibold", 16))
+        # concentric range rings
+        for r in (0.18, 0.34, 0.5):
+            rr = r * min(self._w, self._h)
+            c.create_oval(cx - rr, cy - rr, cx + rr, cy + rr, outline="#2a2e37")
+        # lines + device dots
+        for i, (name, x, y) in enumerate(self._targets):
+            tx, ty = self._pt(x, y)
+            active = i == self._index
+            col = "#00e5c8" if active else "#7f8795"
+            width = 4 if active else 2
+            c.create_line(cx, cy, tx, ty, fill=col, width=width)
+            r = 16 if active else 10
+            c.create_oval(tx - r, ty - r, tx + r, ty + r,
+                          fill=col, outline="")
+            c.create_text(tx, ty - r - 12, text=name,
+                          fill="#ffffff" if active else "#b9bfca",
+                          font=("Segoe UI Semibold" if active else "Segoe UI",
+                                12 if active else 11))
+        # YOU at centre
+        c.create_oval(cx - 12, cy - 12, cx + 12, cy + 12, fill="#ff5d9e",
+                      outline="#ffffff", width=2)
+        c.create_text(cx, cy + 26, text="YOU", fill="#ffb3d1",
+                      font=("Segoe UI Semibold", 11))
+        hint = ("Reach your hand toward a device, then hold"
+                if self._index < 0 else
+                f"Hold to send to {self._targets[self._index][0]}")
+        c.create_text(self._w / 2, self._h - 24, text=hint, fill="#9aa0ad",
+                      font=("Segoe UI", 12))
+
+    def destroy(self):
+        try:
+            self._win.destroy()
+        except Exception:
+            pass
+
+
 class _Manager:
     """Owns the single Tk root + overlay thread; dispatches flash requests."""
 
@@ -414,6 +500,7 @@ class _Manager:
         self._active: set[_Flash] = set()
         self._flies: set = set()
         self._selector: _Selector | None = None
+        self._radar: _Radar | None = None
 
     def flash(self, rect, duration: float = DEFAULT_DURATION,
               style: str | None = None) -> None:
@@ -443,6 +530,19 @@ class _Manager:
     def selector_hide(self) -> None:
         if self._thread and self._thread.is_alive():
             self._q.put(("sel_hide",))
+
+    def radar_show(self, targets, title: str = "Throw to…") -> None:
+        if not self._ensure_thread():
+            return
+        self._q.put(("radar_show", list(targets), title))
+
+    def radar_set(self, index: int) -> None:
+        if self._thread and self._thread.is_alive():
+            self._q.put(("radar_set", index))
+
+    def radar_hide(self) -> None:
+        if self._thread and self._thread.is_alive():
+            self._q.put(("radar_hide",))
 
     def _gradient_for(self, style: str):
         if style not in self._grad_cache:
@@ -509,6 +609,18 @@ class _Manager:
             if self._selector:
                 self._selector.destroy()
                 self._selector = None
+        elif kind == "radar_show":
+            _, targets, title = cmd
+            if self._radar:
+                self._radar.destroy()
+            self._radar = _Radar(self, self._root, targets, title)
+        elif kind == "radar_set":
+            if self._radar:
+                self._radar.set_index(cmd[1])
+        elif kind == "radar_hide":
+            if self._radar:
+                self._radar.destroy()
+                self._radar = None
 
     def _done(self, flash: _Flash) -> None:
         self._active.discard(flash)
@@ -550,3 +662,18 @@ def selector_set(index: int) -> None:
 def selector_hide() -> None:
     """Close the picker."""
     _manager.selector_hide()
+
+
+def radar_show(targets, title: str = "Throw to…") -> None:
+    """Show the canvas map; `targets` = list of (name, x, y) in 0..1."""
+    _manager.radar_show(targets, title)
+
+
+def radar_set(index: int) -> None:
+    """Highlight the target at `index` on the map (-1 = none)."""
+    _manager.radar_set(index)
+
+
+def radar_hide() -> None:
+    """Close the canvas map."""
+    _manager.radar_hide()

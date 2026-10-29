@@ -13,6 +13,7 @@ works everywhere and bundles cleanly with PyInstaller.
 
 from __future__ import annotations
 
+import math
 import threading
 import tkinter as tk
 from tkinter import ttk
@@ -164,6 +165,9 @@ class GUI:
         ttk.Spinbox(trow, from_=2, to=50, width=4, textvariable=self.v_threshold,
                     command=self._save_threshold).pack(side="left", padx=6)
         self._refresh_devices()
+
+        # Canvas map (for the 'canvas' gesture) -----------------------
+        self._build_canvas_card(outer)
 
         # Gesture & behaviour -----------------------------------------
         beh = self._card(outer, "Gesture & behaviour")
@@ -338,6 +342,71 @@ class GUI:
             return
         self.config.save()
         self._refresh_devices()
+
+    # ---- canvas map editor ------------------------------------------
+    def _build_canvas_card(self, outer):
+        card = self._card(outer, "Canvas map  (place each device by its direction)")
+        self.CW, self.CH = 320, 220
+        self.map_cv = tk.Canvas(card, width=self.CW, height=self.CH, bg="#15171c",
+                                highlightthickness=1, highlightbackground="#2a2e37")
+        self.map_cv.pack()
+        self.map_cv.bind("<Button-1>", self._map_press)
+        self.map_cv.bind("<B1-Motion>", self._map_drag)
+        self.map_cv.bind("<ButtonRelease-1>", self._map_release)
+        ttk.Label(card, text="Drag each dot to where that computer sits (centre = "
+                  "you). Then set gesture to 'canvas' and reach toward it.",
+                  style="Muted.TLabel", wraplength=320).pack(anchor="w", pady=(4, 0))
+        self._drag_name = None
+        self._dot_hit = []
+        self._redraw_map()
+
+    def _map_target_pos(self, p, i, n):
+        if p.x is not None and p.y is not None:
+            return p.x, p.y
+        ang = -math.pi / 2 + i * (2 * math.pi / max(1, n))
+        return 0.5 + 0.32 * math.cos(ang), 0.5 + 0.32 * math.sin(ang)
+
+    def _redraw_map(self):
+        c = self.map_cv
+        c.delete("all")
+        cx, cy = self.CW / 2, self.CH / 2
+        for r in (0.18, 0.32):
+            rr = r * min(self.CW, self.CH)
+            c.create_oval(cx - rr, cy - rr, cx + rr, cy + rr, outline="#2a2e37")
+        targets = self.config.all_devices()
+        self._dot_hit = []
+        for i, p in enumerate(targets):
+            x, y = self._map_target_pos(p, i, len(targets))
+            px, py = x * self.CW, y * self.CH
+            c.create_line(cx, cy, px, py, fill="#3a3f4b")
+            c.create_oval(px - 9, py - 9, px + 9, py + 9, fill="#00e5c8", outline="")
+            c.create_text(px, py - 14, text=p.name, fill="#e6e8ee",
+                          font=("Segoe UI", 9))
+            self._dot_hit.append((p.name, px, py))
+        c.create_oval(cx - 8, cy - 8, cx + 8, cy + 8, fill="#ff5d9e", outline="#fff")
+        c.create_text(cx, cy + 18, text="YOU", fill="#ffb3d1", font=("Segoe UI", 9))
+
+    def _map_press(self, e):
+        for name, px, py in self._dot_hit:
+            if (e.x - px) ** 2 + (e.y - py) ** 2 <= 196:  # within 14px
+                self._drag_name = name
+                return
+
+    def _map_drag(self, e):
+        if not self._drag_name:
+            return
+        x = min(max(e.x, 6), self.CW - 6) / self.CW
+        y = min(max(e.y, 6), self.CH - 6) / self.CH
+        for p in list(self.config.peers.values()) + self.config.devices:
+            if p.name == self._drag_name:
+                p.x, p.y = x, y
+        self._redraw_map()
+
+    def _map_release(self, e):
+        if self._drag_name:
+            self.config.save()
+            self._drag_name = None
+            self._flash_status("Canvas positions saved", OK)
 
     def _add_device(self):
         name = self.v_dev_name.get().strip()
