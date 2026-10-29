@@ -21,7 +21,8 @@ from .logs import get_logger
 log = get_logger()
 
 # How a received file is announced. app.py can override this to drive the UI.
-on_received = None  # callable(sender: str, filename: str, path: Path) | None
+# callable(sender: str, filename: str, path: Path, direction: str) | None
+on_received = None
 
 
 def build_app(config: Config) -> FastAPI:
@@ -32,14 +33,15 @@ def build_app(config: Config) -> FastAPI:
         return {"ok": True, "device": config.device_name, "version": "0.1.0"}
 
     @api.post("/receive")
-    async def receive(file: UploadFile = File(...), sender: str = Form("unknown")):
+    async def receive(file: UploadFile = File(...), sender: str = Form("unknown"),
+                      direction: str = Form("")):
         RECEIVED_DIR.mkdir(parents=True, exist_ok=True)
         dest = _unique_path(RECEIVED_DIR / Path(file.filename or "file").name)
         data = await file.read()
         dest.write_bytes(data)
         if on_received:
             try:
-                on_received(sender, dest.name, dest)
+                on_received(sender, dest.name, dest, direction)
             except Exception:  # UI callback must never crash the receiver
                 pass
         log.info("RECEIVED %s (%d bytes) from %s -> %s",
@@ -72,14 +74,15 @@ def start_receiver(config: Config) -> threading.Thread:
     return thread
 
 
-def send_file(peer_url: str, file_path: Path, sender_name: str, timeout: float = 30.0) -> dict:
+def send_file(peer_url: str, file_path: Path, sender_name: str,
+              direction: str = "", timeout: float = 30.0) -> dict:
     """POST a file to a peer. Raises requests exceptions on failure."""
     file_path = Path(file_path)
     with file_path.open("rb") as fh:
         resp = requests.post(
             f"{peer_url}/receive",
             files={"file": (file_path.name, fh)},
-            data={"sender": sender_name},
+            data={"sender": sender_name, "direction": direction},
             timeout=timeout,
         )
     resp.raise_for_status()

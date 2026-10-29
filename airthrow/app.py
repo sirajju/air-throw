@@ -111,11 +111,16 @@ class AirThrow:
         self.status_until = time.time() + seconds
 
     # ---- events ------------------------------------------------------
-    def on_received(self, sender: str, filename: str, path: Path):
+    def on_received(self, sender: str, filename: str, path: Path,
+                    direction: str = ""):
         self.set_status(f"Received {filename} from {sender}", (0, 220, 0), 6)
         if self.config.show_send_animation:
-            # Green "it landed" border flashed full-screen on the receiver.
             try:
+                # The sender threw toward `direction`; it flies across the air
+                # and enters the receiver from the opposite edge.
+                from_dir = {"right": "left", "left": "right"}.get(direction, "right")
+                send_overlay.fly_in(path, from_dir)
+                # Green "it landed" border flashed after the object arrives.
                 send_overlay.flash(None, style=send_overlay.RECEIVE_STYLE)
             except Exception as exc:
                 log.debug("receive animation failed: %s", exc)
@@ -149,6 +154,9 @@ class AirThrow:
             self._picker_swipe(direction, image, rect)
         else:
             self._do_throw(direction, image, rect)
+
+    # NOTE: direction flows all the way to the peer so the receiver can play a
+    # matching "flying in" animation from the sender's side.
 
     # ---- device picker (3+ devices) ---------------------------------
     def _picker_swipe(self, direction: str, image: Path | None, rect):
@@ -199,7 +207,7 @@ class AirThrow:
             self._picker_timer = None
         send_overlay.selector_hide()
         log.info("picker confirmed -> %s", device.name)
-        self._throw_to_peer(device, image, rect, ">>")
+        self._throw_to_peer(device, image, rect, ">>", direction="right")
 
     def _do_throw(self, direction: str, image: Path | None,
                   rect: tuple[int, int, int, int] | None = None):
@@ -209,9 +217,10 @@ class AirThrow:
             log.warning("throw %s but no peer in '%s' slot", direction, direction)
             self.set_status(f"{arrow} No peer in '{direction}' slot", (0, 180, 255))
             return
-        self._throw_to_peer(peer, image, rect, arrow)
+        self._throw_to_peer(peer, image, rect, arrow, direction=direction)
 
-    def _throw_to_peer(self, peer, image: Path | None, rect, arrow: str = ">>"):
+    def _throw_to_peer(self, peer, image: Path | None, rect, arrow: str = ">>",
+                       direction: str = "right"):
         if not image:
             log.warning("throw to %s but no image to send", peer.name)
             self.set_status(f"{arrow} No image open to throw", (0, 180, 255))
@@ -243,15 +252,18 @@ class AirThrow:
         if self.config.show_send_animation:
             try:
                 send_overlay.flash(rect, style=self.config.send_animation_style)
+                # The image itself flies off toward the throw direction.
+                send_overlay.fly_out(image, direction)
             except Exception as exc:  # animation is cosmetic, never fatal
                 log.debug("send animation failed: %s", exc)
         threading.Thread(
-            target=self._send_worker, args=(peer, image, key), daemon=True
+            target=self._send_worker, args=(peer, image, key, direction), daemon=True
         ).start()
 
-    def _send_worker(self, peer, image: Path, key):
+    def _send_worker(self, peer, image: Path, key, direction: str = ""):
         try:
-            result = transfer.send_file(peer.url(), image, self.config.device_name)
+            result = transfer.send_file(peer.url(), image,
+                                        self.config.device_name, direction=direction)
             log.info("SENT %s -> %s (%s)", image.name, peer.name, result)
             self.set_status(f"Sent {image.name} -> {peer.name}", (0, 220, 0), 6)
         except Exception as exc:  # network/file errors shown, not fatal

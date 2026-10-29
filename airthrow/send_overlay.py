@@ -194,6 +194,107 @@ def _make_click_through(win) -> None:
         pass  # purely cosmetic; the border still shows if this fails
 
 
+def _load_thumb(Image, path, maxdim=220):
+    """Load an image as a small PIL RGB thumbnail; fall back to a gradient tile
+    (the generic 'object') if there's no path or it can't be read."""
+    try:
+        if path:
+            img = Image.open(path).convert("RGB")
+            img.thumbnail((maxdim, maxdim))
+            return img
+    except Exception:
+        pass
+    # Generic object: a small aurora-gradient square.
+    import numpy as np
+    grad = _build_gradient(STYLES[DEFAULT_STYLE])
+    side = 140
+    idx = (np.arange(side) * (PERIOD / side)).astype(int) % PERIOD
+    row = grad[idx]
+    arr = np.broadcast_to(row[None, :, :], (side, side, 3))
+    return Image.fromarray(np.ascontiguousarray(arr), "RGB")
+
+
+class _Fly:
+    """A thumbnail that flies across the screen: off toward the throw direction
+    on the sender, or in from the sender's side on the receiver."""
+
+    DURATION = 0.72
+
+    def __init__(self, manager, root, mode, direction, path):
+        self._mgr = manager
+        self._root = root
+        self._start_t = time.time()
+        self._hold_done = False
+
+        import tkinter as tk
+        from PIL import Image, ImageTk
+        self._tk, self._Image, self._ImageTk = tk, Image, ImageTk
+
+        self._base = _load_thumb(Image, path)
+        self._bw, self._bh = self._base.size
+        sw, sh = root.winfo_screenwidth(), root.winfo_screenheight()
+        cy = sh // 2
+        off_r, off_l = sw + 240, -240
+
+        if mode == "out":  # sender: center -> toward the throw direction
+            self._p0 = (sw // 2, cy)
+            self._p1 = (off_r if direction == "right" else off_l, cy)
+            self._s0, self._s1, self._a0, self._a1 = 1.0, 0.45, 1.0, 0.05
+            self._hold = 0.0
+        else:              # receiver: in from the sender's side -> center
+            self._p0 = (off_l if direction == "left" else off_r, cy)
+            self._p1 = (sw // 2, cy)
+            self._s0, self._s1, self._a0, self._a1 = 0.45, 1.0, 0.15, 1.0
+            self._hold = 0.55
+
+        self._win = tk.Toplevel(root)
+        self._win.overrideredirect(True)
+        self._win.attributes("-topmost", True)
+        self._lbl = tk.Label(self._win, bd=0, highlightthickness=0, bg="#000000")
+        self._lbl.pack()
+        _make_click_through(self._win)
+        self._tick()
+
+    def _tick(self):
+        now = time.time()
+        t = (now - self._start_t) / self.DURATION
+        if t >= 1.0:
+            if self._hold and not self._hold_done:
+                self._hold_done = True
+                self._render(1.0)
+                self._root.after(int(self._hold * 1000), self._destroy)
+                return
+            self._destroy()
+            return
+        self._render(t)
+        self._root.after(FRAME_MS, self._tick)
+
+    def _render(self, t):
+        e = 1 - (1 - t) ** 2  # ease-out
+        cx = self._p0[0] + (self._p1[0] - self._p0[0]) * e
+        cy = self._p0[1] + (self._p1[1] - self._p0[1]) * e
+        scale = self._s0 + (self._s1 - self._s0) * e
+        alpha = self._a0 + (self._a1 - self._a0) * e
+        w = max(1, int(self._bw * scale))
+        h = max(1, int(self._bh * scale))
+        img = self._base.resize((w, h))
+        photo = self._ImageTk.PhotoImage(img)
+        self._lbl.configure(image=photo)
+        self._lbl.image = photo
+        self._win.geometry(f"{w}x{h}+{int(cx - w / 2)}+{int(cy - h / 2)}")
+        try:
+            self._win.attributes("-alpha", max(0.0, min(1.0, alpha)))
+        except self._tk.TclError:
+            pass
+
+    def _destroy(self):
+        try:
+            self._win.destroy()
+        except Exception:
+            pass
+        self._mgr._done_fly(self)
+
+
 class _Selector:
     """A centered, gradient-bordered picker listing device names.
 
@@ -311,6 +412,7 @@ class _Manager:
         self._root = None
         self._grad_cache: dict[str, object] = {}  # style name -> gradient array
         self._active: set[_Flash] = set()
+        self._flies: set = set()
         self._selector: _Selector | None = None
 
     def flash(self, rect, duration: float = DEFAULT_DURATION,
@@ -321,6 +423,12 @@ class _Manager:
         if not self._ensure_thread():
             return
         self._q.put(("flash", rect, duration, style or DEFAULT_STYLE))
+
+    def fly(self, mode: str, direction: str, path) -> None:
+        """Fly a thumbnail: mode 'out' (sender) or 'in' (receiver)."""
+        if not self._ensure_thread():
+            return
+        self._q.put(("fly", mode, direction, str(path) if path else ""))
 
     def selector_show(self, names, title: str = "Throw to…",
                       style: str | None = None) -> None:
@@ -385,6 +493,9 @@ class _Manager:
             _, rect, duration, style = cmd
             gradient = self._gradient_for(style)
             self._active.add(_Flash(self, self._root, gradient, rect, duration))
+        elif kind == "fly":
+            _, mode, direction, path = cmd
+            self._flies.add(_Fly(self, self._root, mode, direction, path or None))
         elif kind == "sel_show":
             _, names, title, style = cmd
             if self._selector:
@@ -402,6 +513,9 @@ class _Manager:
     def _done(self, flash: _Flash) -> None:
         self._active.discard(flash)
 
+    def _done_fly(self, fly) -> None:
+        self._flies.discard(fly)
+
 
 _manager = _Manager()
 
@@ -410,6 +524,16 @@ def flash(rect, duration: float = DEFAULT_DURATION,
           style: str | None = None) -> None:
     """Public entrypoint — see :meth:`_Manager.flash`."""
     _manager.flash(rect, duration, style)
+
+
+def fly_out(path, direction: str) -> None:
+    """Sender: fly the image off toward `direction` ('left'/'right')."""
+    _manager.fly("out", direction, path)
+
+
+def fly_in(path, from_direction: str) -> None:
+    """Receiver: fly the image in from `from_direction` ('left'/'right')."""
+    _manager.fly("in", from_direction, path)
 
 
 def selector_show(names, title: str = "Throw to…",

@@ -22,10 +22,24 @@ Four pieces work together:
 
 ## Install
 
-Two ways to run AirThrow: a **standalone executable** (no Python needed) or
-**from source**.
+Three ways to run AirThrow: **download a prebuilt release** (easiest, no build),
+build a **standalone executable** yourself, or run **from source**.
 
-### Option A — standalone executable
+### Option A — download a release (no build needed)
+
+Grab the latest binaries from the
+[**Releases**](https://github.com/sirajju/air-throw/releases) page:
+
+- **Windows** → `airthrow-windows-x64.zip` (contains `airthrow.exe`,
+  `airthrow-gui.exe`, `airthrow-tray.exe`)
+- **Linux** → `airthrow-linux-x64.tar.gz` (contains `airthrow`, `airthrow-gui`,
+  `airthrow-tray`)
+
+Unzip and run — no Python required. These are built automatically on GitHub's
+runners for every version tag (see `.github/workflows/release.yml`), so there's
+always a fresh download for both platforms.
+
+### Option B — build the standalone executable yourself
 
 Build a single-file executable for your OS (PyInstaller cannot cross-compile, so
 each binary is built on its own OS):
@@ -53,7 +67,7 @@ docker run --rm -v "${PWD}/dist:/out" airthrow-linux   # -> ./dist/airthrow
 Then use the binary exactly like the commands below, e.g.
 `airthrow.exe info` / `./airthrow run`.
 
-### Option B — from source
+### Option C — from source
 
 ```bash
 pip install -r requirements.txt
@@ -146,14 +160,17 @@ open image. Then:
 
 1. Open an image in any viewer (Photos, your browser, IrfanView, `eog`, …).
 2. Make the **gesture** (see below) toward **left** or **right**.
-3. An **animated gradient border** flashes around the image's window — the same
-   Huawei-style confirmation that it's being flung — and the open image flies to
-   that direction's peer and lands in its `~/.airthrow/Received` folder, where it
-   **opens automatically** in the default viewer (turn off with
-   `set-auto-open off`). Turn the border off with `set-animation off`.
+3. An **animated gradient border** flashes around the image's window and a
+   **thumbnail of the image flies off** toward the direction you threw — the
+   Huawei-style "flung across the air" confirmation. The open image lands in the
+   peer's `~/.airthrow/Received` folder, where it **opens automatically** in the
+   default viewer (turn off with `set-auto-open off`). Turn the animation off
+   with `set-animation off`.
 
-On the **receiving** machine, a green **"it landed"** border flashes around the
-screen as each file arrives, so you get the same confirmation on both ends.
+On the **receiving** machine, the image **flies in from the sender's side** of
+the screen and a green **"it landed"** border flashes — so the throw looks like
+one continuous motion across both computers. Preview any of this without sending
+with `airthrow preview` (it demos the border styles *and* the flying object).
 
 **Preview the border without sending anything.** No second machine or open image
 needed — just watch it on screen:

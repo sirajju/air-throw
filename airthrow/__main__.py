@@ -75,6 +75,13 @@ def cmd_preview(args):
             print(f"  style: {name}")
             send_overlay.flash(rect, duration=args.duration, style=name)
             time.sleep(args.duration + 0.35)
+
+    # Also demo the flying object (sender throw + receiver arrival).
+    print("  flying object: throw right, throw left, arrive from left, arrive from right")
+    send_overlay.fly_out(None, "right"); time.sleep(1.0)
+    send_overlay.fly_out(None, "left"); time.sleep(1.0)
+    send_overlay.fly_in(None, "left"); time.sleep(1.4)
+    send_overlay.fly_in(None, "right"); time.sleep(1.4)
     print("Preview done. Pick one with:  airthrow set-animation-style <name>")
 
 
