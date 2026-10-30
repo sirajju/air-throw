@@ -15,34 +15,61 @@ function Refresh-Path {
                 [Environment]::GetEnvironmentVariable("Path", "User")
 }
 
-function Ensure-Tool($cmd, $wingetId, $nice) {
-    if (Get-Command $cmd -ErrorAction SilentlyContinue) { return $true }
-    Refresh-Path
-    if (Get-Command $cmd -ErrorAction SilentlyContinue) { return $true }
+function Winget-Install($wingetId, $nice) {
     if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
         Write-Host ""
-        Write-Host "$nice is not installed and 'winget' isn't available to install it." -ForegroundColor Yellow
-        Write-Host "Install $nice, then re-run this command:" -ForegroundColor Yellow
-        if ($cmd -eq "git") { Write-Host "  https://git-scm.com/download/win" }
-        else { Write-Host "  https://www.python.org/downloads/  (tick 'Add python.exe to PATH')" }
+        Write-Host "$nice isn't installed and 'winget' isn't available to install it." -ForegroundColor Yellow
+        if ($wingetId -like "Git*") { Write-Host "  Get Git:    https://git-scm.com/download/win" }
+        else { Write-Host "  Get Python: https://www.python.org/downloads/  (tick 'Add python.exe to PATH')" }
         return $false
     }
     Say "Installing $nice (winget)..."
-    winget install --id $wingetId -e --source winget `
-        --accept-package-agreements --accept-source-agreements --silent
+    # --scope user avoids an admin/UAC prompt; ignore winget's exit code and
+    # re-check by probing, since it varies across versions.
+    try {
+        winget install --id $wingetId -e --source winget --scope user `
+            --accept-package-agreements --accept-source-agreements 2>&1 | Out-Host
+    } catch { }
     Refresh-Path
-    return [bool](Get-Command $cmd -ErrorAction SilentlyContinue)
+    return $true
 }
 
-if (-not (Ensure-Tool "git" "Git.Git" "Git")) {
-    throw "Git is required and could not be installed automatically."
+# Git ------------------------------------------------------------------------
+if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
+    Winget-Install "Git.Git" "Git" | Out-Null
+    Refresh-Path
 }
-if (-not ((Ensure-Tool "python" "Python.Python.3.12" "Python") -or
-          (Get-Command "py" -ErrorAction SilentlyContinue))) {
-    throw "Python is required and could not be installed automatically."
+if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
+    throw "Git is required and could not be installed automatically. Install it (https://git-scm.com/download/win) and re-run."
 }
-# Prefer `python`; fall back to the `py` launcher if that's all we have.
-$PyExe = if (Get-Command python -ErrorAction SilentlyContinue) { "python" } else { "py" }
+
+# Python: find a REAL interpreter, ignoring the Microsoft Store stub
+# (…\WindowsApps\python.exe) which otherwise masquerades as installed Python.
+function Get-RealPython {
+    foreach ($c in @("python", "python3")) {
+        $g = Get-Command $c -ErrorAction SilentlyContinue
+        if ($g -and $g.Source -notlike "*WindowsApps*") {
+            & $c --version *> $null
+            if ($LASTEXITCODE -eq 0) { return $c }
+        }
+    }
+    $g = Get-Command py -ErrorAction SilentlyContinue  # the py launcher
+    if ($g) { & py -3 --version *> $null; if ($LASTEXITCODE -eq 0) { return "py" } }
+    return $null
+}
+
+$PyExe = Get-RealPython
+if (-not $PyExe) {
+    Winget-Install "Python.Python.3.12" "Python" | Out-Null
+    $PyExe = Get-RealPython
+}
+if (-not $PyExe) {
+    throw "Python is required and could not be installed automatically. Install Python 3.12 (https://www.python.org/downloads/, tick 'Add python.exe to PATH') and re-run."
+}
+function Invoke-Py {  # call the chosen interpreter with args (handles the py launcher)
+    if ($PyExe -eq "py") { & py -3 @args } else { & $PyExe @args }
+}
+Say "Using $(Invoke-Py --version)"
 
 # --- clone or update ---------------------------------------------------------
 if (Test-Path (Join-Path $Dir ".git")) {
@@ -56,10 +83,21 @@ if (Test-Path (Join-Path $Dir ".git")) {
 # --- venv + deps -------------------------------------------------------------
 Set-Location $Dir
 Say "Setting up virtualenv (.venv) and installing dependencies..."
-& $PyExe -m venv .venv
+Invoke-Py -m venv .venv
+if ($LASTEXITCODE -ne 0) { throw "Could not create the virtualenv with $(Invoke-Py --version)." }
 $Py = Join-Path $Dir ".venv\Scripts\python.exe"
 & $Py -m pip install --upgrade pip
 & $Py -m pip install -r requirements.txt
+if ($LASTEXITCODE -ne 0) {
+    $ver = (& $Py --version)
+    Write-Host ""
+    Write-Host "Dependency install failed on $ver." -ForegroundColor Yellow
+    Write-Host "mediapipe/opencv may not publish wheels for this Python version yet." -ForegroundColor Yellow
+    Write-Host "Fix: install Python 3.12 and re-run, e.g.:" -ForegroundColor Yellow
+    Write-Host "  winget install --id Python.Python.3.12 -e"
+    Write-Host "  `$env:PATH = [Environment]::GetEnvironmentVariable('Path','User'); irm https://raw.githubusercontent.com/sirajju/air-throw/main/install.ps1 | iex"
+    throw "pip install failed (see note above)."
+}
 
 # --- launcher on PATH --------------------------------------------------------
 $BinDir = Join-Path $env:LOCALAPPDATA "AirThrow\bin"
