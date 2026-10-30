@@ -29,6 +29,7 @@ from .foreground_image import current_image, foreground_rect, foreground_window
 from .gestures import (BaseHandDetector, CanvasDetector, GrabDetector,
                        PalmReachDetector, SwipeDetector, TwoFingerDetector)
 from .logs import LOG_PATH, get_logger
+from .payload import resolve_payload
 
 log = get_logger()
 
@@ -179,12 +180,21 @@ class AirThrow:
         self.set_status("Released (cancelled)", (180, 180, 180), 3)
 
     def on_throw(self, direction: str):
-        """A gesture fired in `direction`. Use the held image (grab) or the
-        current foreground image (swipe)."""
-        image = self._held_image or self.last_image
+        """A gesture fired in `direction`. Payload: the held image (grab mode)
+        or the clipboard-first resolution chain (copied files -> Explorer
+        selection -> open image -> copied screenshot -> last image)."""
+        if self._held_image:
+            image, src = self._held_image, "picked image"
+        else:
+            image, src = resolve_payload(self.last_image)
         rect = self._held_rect or self.last_image_rect
         self._held_image = None
         self._held_rect = None
+        if image:
+            log.info("payload: %s (%s)", image.name, src)
+            self.set_status(f"Sending {src}: {image.name}", (0, 220, 255), 5)
+        else:
+            self.set_status(src.capitalize(), (0, 180, 255), 5)
         if self.config.use_picker():
             self._picker_swipe(direction, image, rect)
         else:
@@ -315,25 +325,32 @@ class AirThrow:
                 log.info("canvas blocked -> %s (strict list)", target.name)
                 self.set_status(f"Blocked (strict): {target.name}", (0, 0, 255), 4)
                 return
+            payload, src = resolve_payload(self.last_image)
             if self._canvas_dry_run:
                 # Simulation: show what WOULD be sent, but don't send.
-                log.info("canvas SIM -> would send to %s", target.name)
-                self.set_status(f"Would send to {target.name} (simulation)",
-                                (0, 220, 0), 4)
+                what = f"{payload.name} ({src})" if payload else src
+                log.info("canvas SIM -> would send %s to %s", what, target.name)
+                self.set_status(f"Would send {what} → {target.name} (simulation)",
+                                (0, 220, 0), 5)
                 return
             if self._canvas_send_fn is not None:
                 # Custom transport (e.g. IP Messenger).
+                if not payload:
+                    self.set_status(src.capitalize(), (0, 180, 255), 5)
+                    return
                 try:
-                    self._canvas_send_fn(target, self.last_image)
-                    self.set_status(f"Sent to {target.name}", (0, 220, 0), 4)
+                    self._canvas_send_fn(target, payload)
+                    self.set_status(f"Sent {payload.name} ({src}) → "
+                                    f"{target.name}", (0, 220, 0), 5)
                 except Exception as exc:
                     log.error("canvas send_fn failed: %s", exc)
                     self.set_status(f"Send failed -> {target.name}: {exc}",
                                     (0, 0, 255), 6)
                 return
             direction = "left" if target.x < 0.5 else "right"
-            log.info("canvas send -> %s", target.name)
-            self._throw_to_peer(target, self.last_image, self.last_image_rect,
+            log.info("canvas send %s (%s) -> %s",
+                     payload.name if payload else "(none)", src, target.name)
+            self._throw_to_peer(target, payload, self.last_image_rect,
                                 ">>", direction=direction)
 
     def _do_throw(self, direction: str, image: Path | None,
