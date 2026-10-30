@@ -86,12 +86,15 @@ def cmd_ipmsg_msg(args):
 
 
 def cmd_ipmsg_canvas(args):
-    """Discover ipmsg peers, lay them on the canvas, and let you pick with your
-    HAND (reach + hold) — simulation only, nothing is sent."""
+    """Discover ipmsg peers, lay them on the canvas, pick with your HAND.
+    Dry-run unless simulation is OFF (set-simulation off) — then it sends the
+    foreground image to the pointed-at peer over IP Messenger."""
     import math
     import time
 
     from .app import SimPeer, run_canvas_sim
+    cfg = Config.load()
+    dry = cfg.simulation_mode
     c = _ipmsg_client()
     if not c.bound:
         c.close()
@@ -100,28 +103,75 @@ def cmd_ipmsg_canvas(args):
     print(f"Discovering IP Messenger peers for {args.seconds}s...")
     time.sleep(args.seconds)
     peers = c.list_peers()
-    c.close()  # free 2425 before the camera starts (camera doesn't need it)
+    # Keep the ipmsg client ALIVE during the camera loop so it can serve files
+    # (it owns 2425; the camera doesn't need that port).
 
     if peers:
-        names = [p.label for p in peers]
+        items = [(p.label, p.ip) for p in peers]
     else:
         print("No peers found — showing a sample layout instead.")
-        names = ["Reception-PC", "Salah", "Nabeel", "Accounts", "Meeting-Room"]
+        items = [(n, "") for n in
+                 ("Reception-PC", "Salah", "Nabeel", "Accounts", "Meeting-Room")]
 
-    # Auto-place around you (centre): even angles, radius staggered so they sit
-    # at varied distances instead of a perfect circle.
-    n = len(names)
+    n = len(items)
     targets = []
-    for i, name in enumerate(names):
+    for i, (name, ip) in enumerate(items):
         ang = -math.pi / 2 + i * (2 * math.pi / max(1, n))
         radius = 0.30 + 0.06 * (i % 2)
         targets.append(SimPeer(name, round(0.5 + radius * math.cos(ang), 3),
-                               round(0.5 + radius * math.sin(ang), 3)))
+                               round(0.5 + radius * math.sin(ang), 3), ip=ip))
 
-    print(f"Placed {n} peer(s) on the canvas. Reach your open hand toward one "
-          "and HOLD to select — nothing is sent. Press q/Esc to quit.")
-    run_canvas_sim(targets, camera_index=args.camera)
-    print("Simulation ended. Nothing was sent.")
+    def send_fn(target, image):
+        if not target.ip:
+            print(f"(no IP for {target.name} — sample peer, nothing sent)")
+            return
+        if not image:
+            print("No foreground image detected to send.")
+            return
+        c.send_file(target.ip, image, "AirThrow")
+        print(f"Sent {image.name} -> {target.name} ({target.ip}) via IP Messenger")
+
+    mode = "SIMULATION (no send)" if dry else "LIVE — will SEND over IP Messenger"
+    print(f"Placed {n} peer(s). Mode: {mode}. Reach your open hand toward one and "
+          "HOLD to select. Blocked (strict) peers can't be selected. q/Esc quits.")
+    try:
+        run_canvas_sim(targets, camera_index=args.camera, dry_run=dry,
+                       send_fn=send_fn)
+    finally:
+        c.close()
+    print("Canvas ended.")
+
+
+def cmd_set_simulation(args):
+    cfg = Config.load()
+    cfg.simulation_mode = args.state == "on"
+    cfg.save()
+    if cfg.simulation_mode:
+        print("Simulation ON — canvas selections are dry-run (nothing is sent).")
+    else:
+        print("Simulation OFF — canvas selections will really send. Strict-list "
+              "peers are still blocked.")
+
+
+def cmd_strict(args):
+    cfg = Config.load()
+    if args.action == "list":
+        if cfg.blocked_names:
+            print("Strict block list (never sent to):")
+            for b in cfg.blocked_names:
+                print(f"  - {b}")
+        else:
+            print("Strict block list is empty.")
+    elif args.action == "add":
+        if not args.name:
+            sys.exit("Usage: airthrow strict add <name>")
+        cfg.block(args.name)
+        print(f"Blocked '{args.name}'. It will never receive a throw.")
+    else:  # remove
+        if not args.name:
+            sys.exit("Usage: airthrow strict remove <name>")
+        ok = cfg.unblock(args.name)
+        print(f"Removed '{args.name}'." if ok else f"'{args.name}' was not listed.")
 
 
 def cmd_ipmsg_send(args):
@@ -457,10 +507,21 @@ def build_parser() -> argparse.ArgumentParser:
     imsg.set_defaults(func=cmd_ipmsg_msg)
 
     ican = sub.add_parser("ipmsg-canvas",
-                          help="discover ipmsg peers; pick one with your hand on the canvas (simulation, no send)")
+                          help="discover ipmsg peers; pick one with your hand on the canvas")
     ican.add_argument("--seconds", type=float, default=4.0, help="discovery time")
     ican.add_argument("--camera", type=int, default=0, help="camera index (default 0)")
     ican.set_defaults(func=cmd_ipmsg_canvas)
+
+    ssm = sub.add_parser("set-simulation",
+                         help="canvas dry-run on/off (off = really send)")
+    ssm.add_argument("state", choices=("on", "off"))
+    ssm.set_defaults(func=cmd_set_simulation)
+
+    st = sub.add_parser("strict",
+                        help="strict block list — never send to these (e.g. managers)")
+    st.add_argument("action", choices=("list", "add", "remove"))
+    st.add_argument("name", nargs="?", default="")
+    st.set_defaults(func=cmd_strict)
 
     isend = sub.add_parser("ipmsg-send", help="send any file to an ipmsg peer")
     isend.add_argument("ip")

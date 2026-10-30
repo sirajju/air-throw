@@ -118,6 +118,7 @@ class AirThrow:
         self._gesture_override: str | None = None
         self._canvas_targets_override: list | None = None
         self._canvas_dry_run = False
+        self._canvas_send_fn = None  # called (target, image) for real sends
         self.status = "Ready"
         self.status_color = (255, 255, 255)
         self.status_until = 0.0
@@ -268,8 +269,9 @@ class AirThrow:
 
         if not self._canvas_shown:
             self._canvas_targets = targets
-            send_overlay.radar_show([(p.name, p.x, p.y) for p in targets],
-                                    "Reach toward a device")
+            labels = [((("\U0001f512 " + p.name) if self.config.is_blocked(p.name)
+                        else p.name), p.x, p.y) for p in targets]
+            send_overlay.radar_show(labels, "Reach toward a device")
             self._canvas_shown = True
             self._canvas_aim = -1
 
@@ -287,6 +289,8 @@ class AirThrow:
         hand_ang = math.atan2(dy, dx)
         best, best_diff = -1, math.pi
         for i, p in enumerate(self._canvas_targets):
+            if self.config.is_blocked(p.name):
+                continue  # strict list: can't even aim at a blocked peer
             t_ang = math.atan2(p.y - 0.5, p.x - 0.5)
             diff = abs(_angle_diff(hand_ang, t_ang))
             if diff < best_diff:
@@ -307,11 +311,25 @@ class AirThrow:
             self._canvas_aim = -1
             self._canvas_shown = False
             send_overlay.radar_hide()
+            if self.config.is_blocked(target.name):
+                log.info("canvas blocked -> %s (strict list)", target.name)
+                self.set_status(f"Blocked (strict): {target.name}", (0, 0, 255), 4)
+                return
             if self._canvas_dry_run:
                 # Simulation: show what WOULD be sent, but don't send.
                 log.info("canvas SIM -> would send to %s", target.name)
                 self.set_status(f"Would send to {target.name} (simulation)",
                                 (0, 220, 0), 4)
+                return
+            if self._canvas_send_fn is not None:
+                # Custom transport (e.g. IP Messenger).
+                try:
+                    self._canvas_send_fn(target, self.last_image)
+                    self.set_status(f"Sent to {target.name}", (0, 220, 0), 4)
+                except Exception as exc:
+                    log.error("canvas send_fn failed: %s", exc)
+                    self.set_status(f"Send failed -> {target.name}: {exc}",
+                                    (0, 0, 255), 6)
                 return
             direction = "left" if target.x < 0.5 else "right"
             log.info("canvas send -> %s", target.name)
@@ -330,6 +348,10 @@ class AirThrow:
 
     def _throw_to_peer(self, peer, image: Path | None, rect, arrow: str = ">>",
                        direction: str = "right"):
+        if self.config.is_blocked(getattr(peer, "name", "")):
+            log.info("blocked send to %s (strict list)", peer.name)
+            self.set_status(f"Blocked (strict): {peer.name}", (0, 0, 255), 5)
+            return
         if not image:
             log.warning("throw to %s but no image to send", peer.name)
             self.set_status(f"{arrow} No image open to throw", (0, 180, 255))
@@ -405,17 +427,19 @@ class AirThrow:
         self._serve()
         self._camera_phase()
 
-    def run_canvas_sim(self, targets):
-        """Hand-controlled canvas SIMULATION: reach toward a device on the map,
-        hold to 'select' — but nothing is sent. Preview on, q/ESC quits. Does
-        not touch saved config or the normal send path."""
+    def run_canvas_sim(self, targets, dry_run: bool = True, send_fn=None):
+        """Hand-controlled canvas: reach toward a device on the map, hold to
+        select. `dry_run` True = nothing is sent (simulation); otherwise
+        `send_fn(target, image)` performs the real send. Preview on, q/ESC
+        quits. Does not touch saved config or the normal send path."""
         self._gesture_override = "canvas"
         self._canvas_targets_override = list(targets)
-        self._canvas_dry_run = True
+        self._canvas_dry_run = dry_run
+        self._canvas_send_fn = send_fn
         self._stop = threading.Event()
         self._preview_fn = lambda: True
         self._quit_on_key = True
-        self._camera_phase()  # no receiver needed for a dry run
+        self._camera_phase()
 
     def start_background(self, stop_event: threading.Event,
                          preview_fn, on_preview_key, frame_sink=None):
@@ -713,17 +737,19 @@ def run(camera_index: int = 0, debug: bool = False):
 
 @dataclass
 class SimPeer:
-    """A lightweight map target (name + canvas position) for the simulation."""
+    """A lightweight map target (name + canvas position + ip) for the canvas."""
     name: str
     x: float
     y: float
+    ip: str = ""
 
 
-def run_canvas_sim(targets, camera_index: int = 0, debug: bool = True):
-    """Entry point: hand-controlled canvas simulation over `targets`
-    (iterable of SimPeer). Nothing is sent."""
-    AirThrow(Config.load(), camera_index=camera_index,
-             debug=debug).run_canvas_sim(targets)
+def run_canvas_sim(targets, camera_index: int = 0, debug: bool = True,
+                   dry_run: bool = True, send_fn=None):
+    """Entry point: hand-controlled canvas over `targets` (iterable of SimPeer).
+    dry_run True = simulation (no send); else send_fn(target, image) sends."""
+    AirThrow(Config.load(), camera_index=camera_index, debug=debug).run_canvas_sim(
+        targets, dry_run=dry_run, send_fn=send_fn)
 
 
 def run_daemon(camera_index: int = 0):

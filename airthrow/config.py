@@ -66,6 +66,11 @@ class Config:
     devices: list[Peer] = field(default_factory=list)
     # How many total devices before a swipe shows the picker (minimum 2).
     picker_threshold: int = 3
+    # Strict mode: names that must NEVER receive a throw (e.g. managers on
+    # IP Messenger). Matched case-insensitively against a peer's name/label.
+    blocked_names: list[str] = field(default_factory=list)
+    # Simulation: when True, canvas "sends" are dry-run (nothing is sent).
+    simulation_mode: bool = True
 
     # ---- persistence -------------------------------------------------
     @classmethod
@@ -92,6 +97,8 @@ class Config:
             peers=peers,
             devices=[Peer(**d) for d in raw.get("devices", []) if d],
             picker_threshold=max(2, int(raw.get("picker_threshold", 3))),
+            blocked_names=[str(x) for x in raw.get("blocked_names", []) if x],
+            simulation_mode=bool(raw.get("simulation_mode", True)),
         )
 
     def save(self) -> None:
@@ -109,6 +116,8 @@ class Config:
             "peers": {slot: asdict(peer) for slot, peer in self.peers.items()},
             "devices": [asdict(d) for d in self.devices],
             "picker_threshold": self.picker_threshold,
+            "blocked_names": self.blocked_names,
+            "simulation_mode": self.simulation_mode,
         }
         CONFIG_PATH.write_text(json.dumps(data, indent=2), encoding="utf-8")
 
@@ -161,6 +170,32 @@ class Config:
         """True when there are at least `picker_threshold` devices, so a swipe
         should open the picker instead of sending straight to a left/right slot."""
         return len(self.all_devices()) >= max(2, self.picker_threshold)
+
+    # ---- strict / block list ------------------------------------------
+    def is_blocked(self, name: str) -> bool:
+        """True if `name` is on the strict block list (never send). Matches
+        case-insensitively on the full label or the part before ' ('."""
+        if not name:
+            return False
+        n = name.strip().lower()
+        base = n.split(" (")[0].strip()
+        for b in self.blocked_names:
+            bl = b.strip().lower()
+            if bl and (bl == n or bl == base or bl in n):
+                return True
+        return False
+
+    def block(self, name: str) -> None:
+        name = name.strip()
+        if name and name not in self.blocked_names:
+            self.blocked_names.append(name)
+            self.save()
+
+    def unblock(self, name: str) -> bool:
+        before = len(self.blocked_names)
+        self.blocked_names = [b for b in self.blocked_names if b != name]
+        self.save()
+        return len(self.blocked_names) != before
 
     # ---- canvas map ----------------------------------------------------
     def positioned_targets(self) -> list[Peer]:

@@ -72,6 +72,7 @@ class GUI:
         self.v_autoopen = tk.BooleanVar(value=self.config.auto_open)
         self.v_anim = tk.BooleanVar(value=self.config.show_send_animation)
         self.v_style = tk.StringVar(value=self.config.send_animation_style)
+        self.v_sim = tk.BooleanVar(value=self.config.simulation_mode)
         self.v_preview = tk.BooleanVar(value=False)
         self.v_camera = tk.IntVar(value=camera_index)
         self.v_peer = {
@@ -224,6 +225,9 @@ class GUI:
 
         # Canvas map (for the 'canvas' gesture) -----------------------
         self._build_canvas_card(outer)
+
+        # Strict mode (block list + simulation) -----------------------
+        self._build_strict_card(outer)
 
         # Gesture & behaviour -----------------------------------------
         beh = self._card(outer, "Gesture & behaviour")
@@ -475,6 +479,61 @@ class GUI:
             self.config.save()
             self._drag_name = None
             self._flash_status("Canvas positions saved", OK)
+
+    # ---- strict mode (block list + simulation) ----------------------
+    def _build_strict_card(self, outer):
+        card = self._card(outer, "Strict mode  (never send to these)")
+        ttk.Checkbutton(card, text="Simulation mode (canvas selects but never sends)",
+                        variable=self.v_sim,
+                        command=self._save_simulation).pack(anchor="w")
+        ttk.Label(card, text="Blocked names (e.g. managers on IP Messenger). "
+                  "Matched in the peer's name.", style="Muted.TLabel",
+                  wraplength=360).pack(anchor="w", pady=(8, 4))
+        self.block_list = tk.Listbox(card, height=3, bg=FIELD, fg=FG,
+                                     borderwidth=0, highlightthickness=1,
+                                     highlightbackground=BORDER, relief="flat",
+                                     selectbackground=ERR, selectforeground="#ffffff",
+                                     activestyle="none", font=(FONT, 10))
+        self.block_list.pack(fill="x")
+        brow = ttk.Frame(card, style="Card.TFrame"); brow.pack(fill="x", pady=(6, 0))
+        self.v_block = tk.StringVar()
+        ttk.Entry(brow, textvariable=self.v_block).pack(side="left", fill="x",
+                                                        expand=True, padx=(0, 6))
+        ttk.Button(brow, text="Block", command=self._add_block).pack(side="left")
+        ttk.Button(brow, text="Unblock", command=self._remove_block).pack(
+            side="left", padx=4)
+        self._refresh_blocked()
+
+    def _save_simulation(self):
+        self.config.simulation_mode = self.v_sim.get()
+        self.config.save()
+        self._flash_status("Simulation ON (dry-run)" if self.v_sim.get()
+                           else "Simulation OFF — canvas will really send", MUTED)
+
+    def _refresh_blocked(self):
+        self.block_list.delete(0, tk.END)
+        for b in self.config.blocked_names:
+            self.block_list.insert(tk.END, b)
+
+    def _add_block(self):
+        name = self.v_block.get().strip()
+        if not name:
+            self._flash_status("Type a name to block", WARN)
+            return
+        self.config.block(name)
+        self.v_block.set("")
+        self._refresh_blocked()
+        self._flash_status(f"Blocked '{name}' — will never receive a throw", OK)
+
+    def _remove_block(self):
+        sel = self.block_list.curselection()
+        if not sel:
+            self._flash_status("Select a blocked name to remove", WARN)
+            return
+        name = self.config.blocked_names[sel[0]]
+        self.config.unblock(name)
+        self._refresh_blocked()
+        self._flash_status(f"Unblocked '{name}'", MUTED)
 
     def _add_device(self):
         name = self.v_dev_name.get().strip()
