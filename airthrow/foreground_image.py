@@ -245,29 +245,86 @@ def current_image() -> Path | None:
     while the AirThrow preview holds focus during a gesture."""
     pid, title = foreground_window()
     if pid and "airthrow" not in (title or "").lower():
-        hit = _open_image_of_pid(pid)
-        if hit:
-            return hit
+        if _pid_scannable(pid):  # heavy apps (browser/IDE/terminal) skipped
+            hit = _open_image_of_pid(pid)
+            if hit:
+                return hit
         hit = _image_from_title(title)
         if hit:
             return hit
 
     # Focused window gave nothing (or is our preview): scan other windows.
     if IS_WINDOWS:
-        windows = [(p, t) for p, t in _visible_windows_windows()
-                   if "airthrow" not in t.lower()]
-        # Open-file check per unique process (top-first), then title fallback.
-        seen: set[int] = set()
-        for wpid, _wtitle in windows:
-            if wpid in seen:
-                continue
-            seen.add(wpid)
-            hit = _open_image_of_pid(wpid)
-            if hit:
-                return hit
+        hit = _scan_other_windows()
+        if hit:
+            return hit
+
+    return _image_from_title(title)
+
+
+# Processes whose open_files() are huge and never a user's photo: browsers and
+# electron apps hold thousands of handles and psutil takes seconds on them
+# (while holding the GIL), which starved the camera loop and lagged the preview.
+_SKIP_PROCS = {
+    "chrome.exe", "msedge.exe", "brave.exe", "firefox.exe", "opera.exe",
+    "vivaldi.exe", "code.exe", "cursor.exe", "devenv.exe", "idea64.exe",
+    "pycharm64.exe", "windowsterminal.exe", "wt.exe", "powershell.exe",
+    "pwsh.exe", "cmd.exe", "python.exe", "pythonw.exe", "airthrow.exe",
+    "airthrow-gui.exe", "airthrow-tray.exe", "discord.exe", "slack.exe",
+    "teams.exe", "ms-teams.exe", "spotify.exe", "steam.exe", "onedrive.exe",
+    "explorer.exe", "searchhost.exe", "shellexperiencehost.exe",
+    "startmenuexperiencehost.exe", "conhost.exe", "openconsole.exe",
+}
+
+
+def _pid_scannable(pid: int) -> bool:
+    """False for processes whose open_files() take seconds (and never hold a
+    user's photo) — browsers, IDEs, terminals, the shell."""
+    try:
+        return psutil.Process(pid).name().lower() not in _SKIP_PROCS
+    except (psutil.NoSuchProcess, psutil.AccessDenied):
+        return False
+
+_SCAN_INTERVAL = 5.0   # full window-scan at most this often
+_SCAN_BUDGET = 1.2     # and never longer than this per scan
+_MAX_WINDOWS = 10      # only the top of the Z-order matters
+_scan_cache: dict = {"t": 0.0, "result": None}
+
+
+def _scan_other_windows() -> Path | None:
+    """Bounded, cached scan of non-focused windows for an open image."""
+    import time as _time
+
+    now = _time.time()
+    if now - _scan_cache["t"] < _SCAN_INTERVAL:
+        return _scan_cache["result"]
+    _scan_cache["t"] = now
+
+    start = _time.perf_counter()
+    result: Path | None = None
+    windows = [(p, t) for p, t in _visible_windows_windows()
+               if "airthrow" not in t.lower()][:_MAX_WINDOWS]
+
+    seen: set[int] = set()
+    for wpid, _wtitle in windows:
+        if wpid in seen:
+            continue
+        seen.add(wpid)
+        if not _pid_scannable(wpid):
+            continue
+        hit = _open_image_of_pid(wpid)
+        if hit:
+            result = hit
+            break
+        if _time.perf_counter() - start > _SCAN_BUDGET:
+            break  # stay cheap; try again on the next scan window
+
+    if result is None:
         for _wpid, wtitle in windows:
             hit = _image_from_title(wtitle)
             if hit:
-                return hit
+                result = hit
+                break
 
-    return _image_from_title(title)
+    _scan_cache["result"] = result
+    return result
