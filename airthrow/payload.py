@@ -98,6 +98,42 @@ def _explorer_selection() -> list[Path]:
     return []
 
 
+def _clipboard_text() -> str | None:
+    """Plain text on the clipboard (Windows via pywin32; Linux via xclip)."""
+    try:
+        import win32clipboard
+        import win32con
+        win32clipboard.OpenClipboard()
+        try:
+            if win32clipboard.IsClipboardFormatAvailable(win32con.CF_UNICODETEXT):
+                return win32clipboard.GetClipboardData(win32con.CF_UNICODETEXT)
+        finally:
+            win32clipboard.CloseClipboard()
+    except ImportError:
+        import subprocess
+        try:
+            r = subprocess.run(["xclip", "-selection", "clipboard", "-o"],
+                               capture_output=True, text=True, timeout=2)
+            if r.returncode == 0:
+                return r.stdout
+        except (OSError, subprocess.SubprocessError):
+            pass
+    except Exception as exc:
+        log.debug("clipboard text read failed: %s", exc)
+    return None
+
+
+def _save_clipboard_text(text: str) -> Path | None:
+    try:
+        OUTBOX.mkdir(parents=True, exist_ok=True)
+        out = OUTBOX / f"text-{int(time.time())}.txt"
+        out.write_text(text, encoding="utf-8")
+        return out
+    except Exception as exc:
+        log.debug("could not save clipboard text: %s", exc)
+        return None
+
+
 def _save_clipboard_image(img) -> Path | None:
     try:
         OUTBOX.mkdir(parents=True, exist_ok=True)
@@ -146,7 +182,17 @@ def resolve_payload(last_image: Path | None = None):
         if saved:
             return saved, "clipboard image"
 
-    # 5. Fall back to the last image we saw.
+    # 5. Copied TEXT -> sent as a .txt file. (An open image still wins above,
+    # so stale clipboard text can't hijack an image throw.)
+    if clip is None:
+        text = _clipboard_text()
+        if text and text.strip():
+            saved = _save_clipboard_text(text)
+            if saved:
+                words = len(text.split())
+                return saved, f"clipboard text ({words} words → .txt)"
+
+    # 6. Fall back to the last image we saw.
     if last_image and Path(last_image).exists():
         return Path(last_image), "last open image"
 

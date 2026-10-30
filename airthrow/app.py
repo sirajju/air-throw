@@ -474,6 +474,8 @@ class AirThrow:
 
     def _serve(self):
         transfer.on_received = self.on_received
+        transfer.on_receiving = lambda sender, name: self.set_status(
+            f"Receiving {name} from {sender}…", (0, 200, 255), 30)
         transfer.start_receiver(self.config)
         log.info("receiving on %s:%d as '%s'",
                  local_ip(), self.config.listen_port, self.config.device_name)

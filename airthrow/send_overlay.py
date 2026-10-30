@@ -194,14 +194,46 @@ def _make_click_through(win) -> None:
         pass  # purely cosmetic; the border still shows if this fails
 
 
+_THUMB_MAX_BYTES = 15 * 1024 * 1024  # never decode anything bigger than this
+_IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp"}
+
+
+def _file_card(Image, ext: str):
+    """A document-card placeholder showing the file's extension — used for
+    non-image or large files so the animation never stalls on loading them."""
+    from PIL import ImageDraw
+
+    w, h = 150, 190
+    img = Image.new("RGB", (w, h), (248, 248, 250))
+    d = ImageDraw.Draw(img)
+    d.rectangle([0, 0, w - 1, h - 1], outline=(190, 190, 198), width=2)
+    # folded corner
+    d.polygon([(w - 34, 0), (w, 34), (w, 0)], fill=(210, 212, 220))
+    # accent banner with the extension
+    d.rectangle([0, h - 64, w, h - 22], fill=(0, 113, 227))
+    label = (ext or "FILE").lstrip(".").upper()[:5] or "FILE"
+    try:
+        tw = d.textlength(label)
+    except Exception:
+        tw = len(label) * 10
+    d.text(((w - tw) / 2, h - 56), label, fill=(255, 255, 255))
+    return img
+
+
 def _load_thumb(Image, path, maxdim=220):
-    """Load an image as a small PIL RGB thumbnail; fall back to a gradient tile
-    (the generic 'object') if there's no path or it can't be read."""
+    """Thumbnail for the fly animation: a real preview only for small images;
+    anything else gets an extension card (instant, no decoding)."""
     try:
         if path:
-            img = Image.open(path).convert("RGB")
-            img.thumbnail((maxdim, maxdim))
-            return img
+            from pathlib import Path as _P
+            p = _P(path)
+            ext = p.suffix.lower()
+            if ext in _IMAGE_EXTS and p.stat().st_size <= _THUMB_MAX_BYTES:
+                img = Image.open(p).convert("RGB")
+                img.thumbnail((maxdim, maxdim))
+                return img
+            if p.suffix:  # any other file: show its extension card
+                return _file_card(Image, ext)
     except Exception:
         pass
     # Generic object: a small aurora-gradient square.

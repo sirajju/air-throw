@@ -349,6 +349,9 @@ class IpmsgClient:
                 path = self._offered.get((pkt_no, file_id))
             if not path or not path.exists():
                 return
+            peer_ip = conn.getpeername()[0] if conn else "?"
+            log.info("ipmsg: %s is downloading %s (%.1f MB)...",
+                     peer_ip, path.name, path.stat().st_size / 1e6)
             with path.open("rb") as fh:
                 fh.seek(offset)
                 while not self._stop.is_set():

@@ -20,9 +20,13 @@ from .logs import get_logger
 
 log = get_logger()
 
-# How a received file is announced. app.py can override this to drive the UI.
+# How a received file is announced. app.py can override these to drive the UI.
 # callable(sender: str, filename: str, path: Path, direction: str) | None
 on_received = None
+# Called as the transfer STARTS (before the body is read), so the receiver can
+# show "Receiving <file>..." while a large file is still downloading.
+# callable(sender: str, filename: str) | None
+on_receiving = None
 
 
 def build_app(config: Config) -> FastAPI:
@@ -37,6 +41,12 @@ def build_app(config: Config) -> FastAPI:
                       direction: str = Form("")):
         RECEIVED_DIR.mkdir(parents=True, exist_ok=True)
         dest = _unique_path(RECEIVED_DIR / Path(file.filename or "file").name)
+        if on_receiving:
+            try:
+                on_receiving(sender, dest.name)
+            except Exception:
+                pass
+        log.info("receiving %s from %s ...", dest.name, sender)
         data = await file.read()
         dest.write_bytes(data)
         if on_received:
