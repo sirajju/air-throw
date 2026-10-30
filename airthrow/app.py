@@ -18,6 +18,7 @@ import subprocess
 import sys
 import threading
 import time
+from dataclasses import dataclass
 from pathlib import Path
 
 import cv2
@@ -112,6 +113,11 @@ class AirThrow:
         self._canvas_since = 0.0
         self._canvas_last_fire = 0.0
         self._canvas_miss = 0
+        # Optional overrides (used by the hand-controlled simulation — leaving
+        # them None keeps the normal send behaviour untouched).
+        self._gesture_override: str | None = None
+        self._canvas_targets_override: list | None = None
+        self._canvas_dry_run = False
         self.status = "Ready"
         self.status_color = (255, 255, 255)
         self.status_until = 0.0
@@ -243,7 +249,7 @@ class AirThrow:
         your hand points toward (angle from screen centre), and send after a
         short hold. The map is debounced — a brief hand loss won't close it."""
         det = self.detector
-        targets = self.config.positioned_targets()
+        targets = self._canvas_targets_override or self.config.positioned_targets()
         if not targets:
             if det and det.hand_present:
                 self.set_status("Canvas: place devices on the map (GUI canvas)",
@@ -301,6 +307,12 @@ class AirThrow:
             self._canvas_aim = -1
             self._canvas_shown = False
             send_overlay.radar_hide()
+            if self._canvas_dry_run:
+                # Simulation: show what WOULD be sent, but don't send.
+                log.info("canvas SIM -> would send to %s", target.name)
+                self.set_status(f"Would send to {target.name} (simulation)",
+                                (0, 220, 0), 4)
+                return
             direction = "left" if target.x < 0.5 else "right"
             log.info("canvas send -> %s", target.name)
             self._throw_to_peer(target, self.last_image, self.last_image_rect,
@@ -371,7 +383,7 @@ class AirThrow:
     # ---- detector ----------------------------------------------------
     def _build_detector(self) -> BaseHandDetector:
         dist = self.config.swipe_min_distance
-        mode = self.config.gesture_mode
+        mode = self._gesture_override or self.config.gesture_mode
         if mode == "grab":
             return GrabDetector(on_throw=self.on_throw, on_pick=self.on_pick,
                                 on_cancel=self.on_cancel, min_distance=dist)
@@ -392,6 +404,18 @@ class AirThrow:
         self._quit_on_key = True
         self._serve()
         self._camera_phase()
+
+    def run_canvas_sim(self, targets):
+        """Hand-controlled canvas SIMULATION: reach toward a device on the map,
+        hold to 'select' — but nothing is sent. Preview on, q/ESC quits. Does
+        not touch saved config or the normal send path."""
+        self._gesture_override = "canvas"
+        self._canvas_targets_override = list(targets)
+        self._canvas_dry_run = True
+        self._stop = threading.Event()
+        self._preview_fn = lambda: True
+        self._quit_on_key = True
+        self._camera_phase()  # no receiver needed for a dry run
 
     def start_background(self, stop_event: threading.Event,
                          preview_fn, on_preview_key, frame_sink=None):
@@ -490,7 +514,7 @@ class AirThrow:
 
             self.camera_ok = True
             frame, _ = self.detector.process(frame)
-            if self.config.gesture_mode == "canvas":
+            if (self._gesture_override or self.config.gesture_mode) == "canvas":
                 self._canvas_tick()
 
             want_preview = self._preview_fn()
@@ -685,6 +709,21 @@ def open_with_default_app(path: Path) -> None:
 
 def run(camera_index: int = 0, debug: bool = False):
     AirThrow(Config.load(), camera_index=camera_index, debug=debug).run()
+
+
+@dataclass
+class SimPeer:
+    """A lightweight map target (name + canvas position) for the simulation."""
+    name: str
+    x: float
+    y: float
+
+
+def run_canvas_sim(targets, camera_index: int = 0, debug: bool = True):
+    """Entry point: hand-controlled canvas simulation over `targets`
+    (iterable of SimPeer). Nothing is sent."""
+    AirThrow(Config.load(), camera_index=camera_index,
+             debug=debug).run_canvas_sim(targets)
 
 
 def run_daemon(camera_index: int = 0):

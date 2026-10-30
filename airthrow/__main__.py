@@ -86,12 +86,12 @@ def cmd_ipmsg_msg(args):
 
 
 def cmd_ipmsg_canvas(args):
-    """Discover ipmsg peers and lay them out on the canvas map — simulation
-    only, nothing is sent."""
+    """Discover ipmsg peers, lay them on the canvas, and let you pick with your
+    HAND (reach + hold) — simulation only, nothing is sent."""
     import math
     import time
 
-    from . import send_overlay
+    from .app import SimPeer, run_canvas_sim
     c = _ipmsg_client()
     if not c.bound:
         c.close()
@@ -100,7 +100,7 @@ def cmd_ipmsg_canvas(args):
     print(f"Discovering IP Messenger peers for {args.seconds}s...")
     time.sleep(args.seconds)
     peers = c.list_peers()
-    c.close()
+    c.close()  # free 2425 before the camera starts (camera doesn't need it)
 
     if peers:
         names = [p.label for p in peers]
@@ -108,28 +108,20 @@ def cmd_ipmsg_canvas(args):
         print("No peers found — showing a sample layout instead.")
         names = ["Reception-PC", "Salah", "Nabeel", "Accounts", "Meeting-Room"]
 
-    # Auto-place around you (centre): even angles, radius staggered a little so
-    # they sit at varied distances instead of a perfect circle.
+    # Auto-place around you (centre): even angles, radius staggered so they sit
+    # at varied distances instead of a perfect circle.
     n = len(names)
     targets = []
     for i, name in enumerate(names):
         ang = -math.pi / 2 + i * (2 * math.pi / max(1, n))
-        radius = 0.30 + 0.06 * (i % 2)       # alternate near/far for spacing
-        x = 0.5 + radius * math.cos(ang)
-        y = 0.5 + radius * math.sin(ang)
-        targets.append((name, round(x, 3), round(y, 3)))
+        radius = 0.30 + 0.06 * (i % 2)
+        targets.append(SimPeer(name, round(0.5 + radius * math.cos(ang), 3),
+                               round(0.5 + radius * math.sin(ang), 3)))
 
-    print(f"Placing {n} peer(s) on the canvas (simulation — no send):")
-    for name, x, y in targets:
-        print(f"  {name:20} @ ({x}, {y})")
-    send_overlay.radar_show(targets, "IP Messenger peers (simulation)")
-    # Sweep the highlight so you can see each one, then close.
-    for i in range(n * 2):
-        send_overlay.radar_set(i % n)
-        time.sleep(0.7)
-    time.sleep(0.8)
-    send_overlay.radar_hide()
-    print("Simulation done. Nothing was sent.")
+    print(f"Placed {n} peer(s) on the canvas. Reach your open hand toward one "
+          "and HOLD to select — nothing is sent. Press q/Esc to quit.")
+    run_canvas_sim(targets, camera_index=args.camera)
+    print("Simulation ended. Nothing was sent.")
 
 
 def cmd_ipmsg_send(args):
@@ -465,8 +457,9 @@ def build_parser() -> argparse.ArgumentParser:
     imsg.set_defaults(func=cmd_ipmsg_msg)
 
     ican = sub.add_parser("ipmsg-canvas",
-                          help="discover ipmsg peers and lay them on the canvas (simulation, no send)")
+                          help="discover ipmsg peers; pick one with your hand on the canvas (simulation, no send)")
     ican.add_argument("--seconds", type=float, default=4.0, help="discovery time")
+    ican.add_argument("--camera", type=int, default=0, help="camera index (default 0)")
     ican.set_defaults(func=cmd_ipmsg_canvas)
 
     isend = sub.add_parser("ipmsg-send", help="send any file to an ipmsg peer")
