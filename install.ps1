@@ -9,12 +9,40 @@ $Repo = "https://github.com/sirajju/air-throw"
 $Dir  = if ($env:AIRTHROW_DIR) { $env:AIRTHROW_DIR } else { Join-Path $HOME "AirThrow" }
 function Say($m) { Write-Host "==> $m" -ForegroundColor Cyan }
 
-# --- prerequisites -----------------------------------------------------------
-foreach ($c in "git", "python") {
-    if (-not (Get-Command $c -ErrorAction SilentlyContinue)) {
-        throw "$c is required. Install it first (e.g. 'winget install Git.Git' or 'winget install Python.Python.3.12'), then re-run."
-    }
+# --- prerequisites: auto-install git + python if missing ---------------------
+function Refresh-Path {
+    $env:Path = [Environment]::GetEnvironmentVariable("Path", "Machine") + ";" +
+                [Environment]::GetEnvironmentVariable("Path", "User")
 }
+
+function Ensure-Tool($cmd, $wingetId, $nice) {
+    if (Get-Command $cmd -ErrorAction SilentlyContinue) { return $true }
+    Refresh-Path
+    if (Get-Command $cmd -ErrorAction SilentlyContinue) { return $true }
+    if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
+        Write-Host ""
+        Write-Host "$nice is not installed and 'winget' isn't available to install it." -ForegroundColor Yellow
+        Write-Host "Install $nice, then re-run this command:" -ForegroundColor Yellow
+        if ($cmd -eq "git") { Write-Host "  https://git-scm.com/download/win" }
+        else { Write-Host "  https://www.python.org/downloads/  (tick 'Add python.exe to PATH')" }
+        return $false
+    }
+    Say "Installing $nice (winget)..."
+    winget install --id $wingetId -e --source winget `
+        --accept-package-agreements --accept-source-agreements --silent
+    Refresh-Path
+    return [bool](Get-Command $cmd -ErrorAction SilentlyContinue)
+}
+
+if (-not (Ensure-Tool "git" "Git.Git" "Git")) {
+    throw "Git is required and could not be installed automatically."
+}
+if (-not ((Ensure-Tool "python" "Python.Python.3.12" "Python") -or
+          (Get-Command "py" -ErrorAction SilentlyContinue))) {
+    throw "Python is required and could not be installed automatically."
+}
+# Prefer `python`; fall back to the `py` launcher if that's all we have.
+$PyExe = if (Get-Command python -ErrorAction SilentlyContinue) { "python" } else { "py" }
 
 # --- clone or update ---------------------------------------------------------
 if (Test-Path (Join-Path $Dir ".git")) {
@@ -28,7 +56,7 @@ if (Test-Path (Join-Path $Dir ".git")) {
 # --- venv + deps -------------------------------------------------------------
 Set-Location $Dir
 Say "Setting up virtualenv (.venv) and installing dependencies..."
-python -m venv .venv
+& $PyExe -m venv .venv
 $Py = Join-Path $Dir ".venv\Scripts\python.exe"
 & $Py -m pip install --upgrade pip
 & $Py -m pip install -r requirements.txt

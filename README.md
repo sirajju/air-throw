@@ -25,7 +25,8 @@ Four pieces work together:
 ### Quick install (one command)
 
 Installs from this git repo into an isolated environment and adds an `airthrow`
-command. Needs **git** and **Python 3** present.
+command. **Missing git or Python is installed for you** — winget on Windows,
+your package manager (apt/dnf/pacman/zypper/apk) on Linux, Homebrew on macOS.
 
 **Linux / macOS**
 ```bash

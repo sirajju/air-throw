@@ -11,28 +11,58 @@ REPO="https://github.com/sirajju/air-throw"
 DIR="${AIRTHROW_DIR:-$HOME/AirThrow}"
 say() { printf '\033[36m==>\033[0m %s\n' "$*"; }
 
-# --- system packages (venv tooling, OpenCV libs, xdotool) --------------------
+# --- prerequisites: install git + python (+ venv, OpenCV libs, xdotool) -------
+# Auto-installs via whatever package manager is present so nobody has to set up
+# git/python by hand. Best-effort: a missing package just prints "(skipped …)".
 SUDO=""; [ "$(id -u)" -ne 0 ] && command -v sudo >/dev/null 2>&1 && SUDO="sudo"
-if command -v apt-get >/dev/null 2>&1; then
-    say "Installing system packages (apt)..."
-    glib="libglib2.0-0"
-    apt-cache show libglib2.0-0t64 >/dev/null 2>&1 && glib="libglib2.0-0t64"
-    $SUDO apt-get update -qq || true
-    for p in git python3 python3-venv libgl1 "$glib" xdotool; do
-        $SUDO apt-get install -y "$p" || echo "  (skipped $p)"
-    done
-elif command -v dnf >/dev/null 2>&1; then
-    say "Installing system packages (dnf)..."
-    for p in git python3 mesa-libGL glib2 xdotool; do
-        $SUDO dnf install -y "$p" || echo "  (skipped $p)"
-    done
-elif command -v pacman >/dev/null 2>&1; then
-    say "Installing system packages (pacman)..."
-    $SUDO pacman -S --needed --noconfirm git python mesa glib2 xdotool || true
-fi
+install_deps() {
+    if command -v apt-get >/dev/null 2>&1; then
+        say "Installing system packages (apt)..."
+        local glib="libglib2.0-0"
+        apt-cache show libglib2.0-0t64 >/dev/null 2>&1 && glib="libglib2.0-0t64"
+        $SUDO apt-get update -qq || true
+        for p in git python3 python3-venv libgl1 "$glib" xdotool; do
+            $SUDO apt-get install -y "$p" || echo "  (skipped $p)"
+        done
+    elif command -v dnf >/dev/null 2>&1; then
+        say "Installing system packages (dnf)..."
+        for p in git python3 python3-pip mesa-libGL glib2 xdotool; do
+            $SUDO dnf install -y "$p" || echo "  (skipped $p)"
+        done
+    elif command -v pacman >/dev/null 2>&1; then
+        say "Installing system packages (pacman)..."
+        $SUDO pacman -Sy --needed --noconfirm git python python-pip mesa glib2 xdotool || true
+    elif command -v zypper >/dev/null 2>&1; then
+        say "Installing system packages (zypper)..."
+        for p in git python3 python3-pip Mesa-libGL1 libglib-2_0-0 xdotool; do
+            $SUDO zypper --non-interactive install "$p" || echo "  (skipped $p)"
+        done
+    elif command -v apk >/dev/null 2>&1; then
+        say "Installing system packages (apk)..."
+        for p in git python3 py3-pip mesa-gl glib xdotool; do
+            $SUDO apk add "$p" || echo "  (skipped $p)"
+        done
+    elif command -v brew >/dev/null 2>&1; then
+        say "Installing packages (Homebrew)..."
+        for p in git python; do
+            brew list "$p" >/dev/null 2>&1 || brew install "$p" || echo "  (skipped $p)"
+        done
+    else
+        echo "No supported package manager (apt/dnf/pacman/zypper/apk/brew) found."
+        if [ "$(uname)" = "Darwin" ]; then
+            echo "Install Homebrew (https://brew.sh) — or run 'xcode-select --install'"
+            echo "for git — then re-run this installer."
+        else
+            echo "Please install 'git' and 'python3' (with the venv module), then re-run."
+        fi
+    fi
+}
+install_deps
 
-command -v git >/dev/null 2>&1 || { echo "git is required but missing."; exit 1; }
-command -v python3 >/dev/null 2>&1 || { echo "python3 is required but missing."; exit 1; }
+command -v git >/dev/null 2>&1 || {
+    echo "git is still missing. Install it and re-run this installer."; exit 1; }
+command -v python3 >/dev/null 2>&1 || {
+    echo "python3 is still missing. Install it and re-run this installer."; exit 1; }
 
 # --- clone or update ---------------------------------------------------------
 if [ -d "$DIR/.git" ]; then
