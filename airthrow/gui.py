@@ -619,9 +619,12 @@ class GUI:
         app = self.app
         if not app:
             return "Camera: stopped"
-        det = app.detector
+        if getattr(app, "receive_only", False):
+            return ("No camera available — receive-only. Close other apps or "
+                    "AirThrow windows using the webcam, or change the Camera index.")
         if not getattr(app, "camera_ok", False):
-            return "Camera: starting… (or no webcam → receive-only)"
+            return "Camera: starting…"
+        det = app.detector
         if det and det.hand_present:
             fingers = getattr(det, "fingers", 0)
             img = app.last_image.name if app.last_image else "no image open"
@@ -630,7 +633,11 @@ class GUI:
 
     def _tracking_color(self):
         app = self.app
-        if app and app.detector and app.detector.hand_present:
+        if not app:
+            return MUTED
+        if getattr(app, "receive_only", False):
+            return WARN
+        if app.detector and app.detector.hand_present:
             return OK
         return MUTED
 

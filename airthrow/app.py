@@ -130,6 +130,7 @@ class AirThrow:
         # an OpenCV window. Also always exposes the latest frame for feedback.
         self._frame_sink = None
         self.camera_ok = False               # True once frames are flowing
+        self.receive_only = False            # True when no usable camera
 
     # ---- status helpers ---------------------------------------------
     def set_status(self, text: str, color=(255, 255, 255), seconds: float = 4.0):
@@ -414,11 +415,23 @@ class AirThrow:
         log.info("log file: %s", LOG_PATH)
 
     def _camera_phase(self):
-        cap, backend = open_camera(self.camera_index)
+        # Retry a few times: the camera can be briefly busy (just released by
+        # another app or AirThrow window) and succeed a moment later.
+        cap = None
+        backend = ""
+        for attempt in range(4):
+            cap, backend = open_camera(self.camera_index)
+            if cap is not None:
+                break
+            log.warning("camera %d: %s (attempt %d/4)",
+                        self.camera_index, backend, attempt + 1)
+            if self._stop.wait(0.7):
+                return
         if cap is None:
-            log.warning("camera %d: %s", self.camera_index, backend)
+            self.receive_only = True
             self._receive_until_stop()
             return
+        self.receive_only = False
         self.detector = self._build_detector()
         log.info("camera %d open via %s; gesture=%s; sensitivity=%.2f",
                  self.camera_index, backend, self.config.gesture_mode,
@@ -519,6 +532,7 @@ class AirThrow:
 
     def _receive_until_stop(self):
         """No usable camera: keep accepting throws. Sending needs a webcam."""
+        self.receive_only = True
         log.warning(
             "camera %d unavailable — RECEIVE-ONLY. Can accept throws but cannot "
             "send (gestures need a webcam).", self.camera_index)
