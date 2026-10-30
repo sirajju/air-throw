@@ -85,6 +85,53 @@ def cmd_ipmsg_msg(args):
     c.close()
 
 
+def cmd_ipmsg_canvas(args):
+    """Discover ipmsg peers and lay them out on the canvas map — simulation
+    only, nothing is sent."""
+    import math
+    import time
+
+    from . import send_overlay
+    c = _ipmsg_client()
+    if not c.bound:
+        c.close()
+        sys.exit("Port 2425 is held by IP Messenger here — close it so discovery "
+                 "can run, then retry.")
+    print(f"Discovering IP Messenger peers for {args.seconds}s...")
+    time.sleep(args.seconds)
+    peers = c.list_peers()
+    c.close()
+
+    if peers:
+        names = [p.label for p in peers]
+    else:
+        print("No peers found — showing a sample layout instead.")
+        names = ["Reception-PC", "Salah", "Nabeel", "Accounts", "Meeting-Room"]
+
+    # Auto-place around you (centre): even angles, radius staggered a little so
+    # they sit at varied distances instead of a perfect circle.
+    n = len(names)
+    targets = []
+    for i, name in enumerate(names):
+        ang = -math.pi / 2 + i * (2 * math.pi / max(1, n))
+        radius = 0.30 + 0.06 * (i % 2)       # alternate near/far for spacing
+        x = 0.5 + radius * math.cos(ang)
+        y = 0.5 + radius * math.sin(ang)
+        targets.append((name, round(x, 3), round(y, 3)))
+
+    print(f"Placing {n} peer(s) on the canvas (simulation — no send):")
+    for name, x, y in targets:
+        print(f"  {name:20} @ ({x}, {y})")
+    send_overlay.radar_show(targets, "IP Messenger peers (simulation)")
+    # Sweep the highlight so you can see each one, then close.
+    for i in range(n * 2):
+        send_overlay.radar_set(i % n)
+        time.sleep(0.7)
+    time.sleep(0.8)
+    send_overlay.radar_hide()
+    print("Simulation done. Nothing was sent.")
+
+
 def cmd_ipmsg_send(args):
     import time
     from pathlib import Path
@@ -416,6 +463,11 @@ def build_parser() -> argparse.ArgumentParser:
     imsg.add_argument("ip")
     imsg.add_argument("text")
     imsg.set_defaults(func=cmd_ipmsg_msg)
+
+    ican = sub.add_parser("ipmsg-canvas",
+                          help="discover ipmsg peers and lay them on the canvas (simulation, no send)")
+    ican.add_argument("--seconds", type=float, default=4.0, help="discovery time")
+    ican.set_defaults(func=cmd_ipmsg_canvas)
 
     isend = sub.add_parser("ipmsg-send", help="send any file to an ipmsg peer")
     isend.add_argument("ip")
