@@ -47,6 +47,9 @@ hiddenimports += [
 # The GUI and the send-border overlay use tkinter + PIL's ImageTk.
 hiddenimports += ["tkinter", "tkinter.ttk", "PIL.ImageTk"]
 
+# Lazily-imported AirThrow submodules (imported inside functions).
+hiddenimports += ["airthrow.ipmsg"]
+
 # Windows autostart shortcut uses win32com (part of pywin32).
 if sys.platform.startswith("win"):
     hiddenimports += ["win32com", "win32com.client", "pythoncom", "pywintypes",

@@ -16,6 +16,7 @@ mtime:attr:\\a``); the receiver then opens TCP 2425 and sends GETFILEDATA
 
 from __future__ import annotations
 
+import ipaddress
 import os
 import socket
 import threading
@@ -70,6 +71,48 @@ def _utf8(s: str) -> bytes:
     return s.encode("utf-8", "replace")
 
 
+def broadcast_addresses() -> list[str]:
+    """Directed broadcast address for every real IPv4 interface.
+
+    A plain 255.255.255.255 only leaves one interface, so on a machine with a
+    VirtualBox/VMware/WSL adapter the discovery packet can miss the real LAN.
+    We compute a.b.c.255 (etc.) per interface so every subnet is reached."""
+    out: list[str] = []
+    try:
+        import psutil
+        for snics in psutil.net_if_addrs().values():
+            for s in snics:
+                if s.family != socket.AF_INET or not s.address or not s.netmask:
+                    continue
+                if s.address.startswith(("127.", "169.254.")):
+                    continue
+                try:
+                    net = ipaddress.IPv4Network(f"{s.address}/{s.netmask}",
+                                                strict=False)
+                    out.append(str(net.broadcast_address))
+                except ValueError:
+                    continue
+    except Exception:
+        pass
+    if "255.255.255.255" not in out:
+        out.append("255.255.255.255")
+    return out
+
+
+def _own_ipv4() -> set[str]:
+    """This machine's own IPv4 addresses (to skip self in discovery)."""
+    ips = {"127.0.0.1"}
+    try:
+        import psutil
+        for snics in psutil.net_if_addrs().values():
+            for s in snics:
+                if s.family == socket.AF_INET and s.address:
+                    ips.add(s.address)
+    except Exception:
+        pass
+    return ips
+
+
 class IpmsgClient:
     """A minimal IP Messenger node: discovery + send message + send file.
 
@@ -88,6 +131,7 @@ class IpmsgClient:
         self.on_peer = on_peer or (lambda p: None)
 
         self.peers: dict[str, IpmsgPeer] = {}
+        self._own_ips = _own_ipv4()
         self._pkt = int(time.time())
         self._lock = threading.Lock()
         self._stop = threading.Event()
@@ -166,12 +210,18 @@ class IpmsgClient:
 
     def broadcast(self, command: int, payload: bytes = b"") -> None:
         data, _ = self._packet(command, payload)
-        for addr in ("255.255.255.255", "<broadcast>"):
+        sent = False
+        for addr in broadcast_addresses():  # one per interface subnet
             try:
                 self._udp.sendto(data, (addr, self.port))
-                break
+                sent = True
             except OSError:
                 continue
+        if not sent:
+            try:
+                self._udp.sendto(data, ("255.255.255.255", self.port))
+            except OSError:
+                pass
 
     def _send(self, ip: str, command: int, payload: bytes = b"",
               pkt_no: int | None = None) -> int:
@@ -226,6 +276,8 @@ class IpmsgClient:
             return
         base = cmd_word & 0xFF
         text = payload.decode("utf-8", "replace")
+        if ip in self._own_ips:
+            return  # ignore our own broadcast echoed back
         peer = self._touch_peer(ip, user.decode("utf-8", "replace"),
                                 host.decode("utf-8", "replace"))
 
