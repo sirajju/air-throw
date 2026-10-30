@@ -40,6 +40,74 @@ def cmd_daemon(args):
     run_daemon(camera_index=args.camera)
 
 
+def _ipmsg_client():
+    from .ipmsg import IpmsgClient
+    cfg = Config.load()
+    c = IpmsgClient(user_name=cfg.device_name,
+                    on_message=lambda p, t: print(f"\n[msg] {p.label} ({p.ip}): {t}"),
+                    on_peer=lambda p: None)
+    c.start()
+    return c
+
+
+def cmd_ipmsg_scan(args):
+    """Auto-discover IP Messenger peers on the LAN (no manual IPs)."""
+    import time
+    c = _ipmsg_client()
+    if not c.bound:
+        c.close()
+        sys.exit("Port 2425 is in use by IP Messenger on THIS machine. Close it "
+                 "first — discovery needs that port (AirThrow replaces ipmsg here).")
+    print(f"Discovering IP Messenger peers for {args.seconds}s "
+          f"(everyone running ipmsg answers)...")
+    try:
+        time.sleep(args.seconds)
+    except KeyboardInterrupt:
+        pass
+    peers = c.list_peers()
+    c.close()
+    if not peers:
+        print("No peers found. Are others running IP Messenger on this LAN?")
+        return
+    print(f"\nFound {len(peers)} peer(s):")
+    for p in peers:
+        print(f"  {p.ip:16} {p.label}  (host={p.host})")
+
+
+def cmd_ipmsg_msg(args):
+    import time
+    c = _ipmsg_client()
+    time.sleep(0.4)  # let the socket settle
+    c.send_message(args.ip, args.text)
+    mode = "" if c.bound else " (send-only; no delivery confirmation)"
+    print(f"Message sent to {args.ip}{mode}.")
+    time.sleep(0.6)  # allow the ack to arrive
+    c.close()
+
+
+def cmd_ipmsg_send(args):
+    import time
+    from pathlib import Path
+    path = Path(args.file)
+    if not path.exists():
+        sys.exit(f"No such file: {path}")
+    c = _ipmsg_client()
+    if not c.bound:
+        c.close()
+        sys.exit("Port 2425 is in use by IP Messenger on THIS machine. File "
+                 "sending needs that port — close IP Messenger here and retry.")
+    time.sleep(0.4)
+    c.send_file(args.ip, path, args.text or "")
+    print(f"Offered {path.name} to {args.ip}. Keeping the transfer server up...")
+    print("Leave this running until the peer has accepted the file. Ctrl+C to stop.")
+    try:
+        while True:
+            time.sleep(1)
+    except KeyboardInterrupt:
+        pass
+    c.close()
+
+
 def cmd_service(args):
     from . import autostart
     if args.action == "install":
@@ -337,6 +405,23 @@ def build_parser() -> argparse.ArgumentParser:
                         help="install/remove the background service (auto-start on login)")
     sv.add_argument("action", choices=("install", "uninstall", "status"))
     sv.set_defaults(func=cmd_service)
+
+    # IP Messenger interop (auto-discovery + messages + files).
+    isc = sub.add_parser("ipmsg-scan",
+                         help="auto-discover IP Messenger peers on the LAN")
+    isc.add_argument("--seconds", type=float, default=3.0, help="listen time")
+    isc.set_defaults(func=cmd_ipmsg_scan)
+
+    imsg = sub.add_parser("ipmsg-msg", help="send a text message to an ipmsg peer")
+    imsg.add_argument("ip")
+    imsg.add_argument("text")
+    imsg.set_defaults(func=cmd_ipmsg_msg)
+
+    isend = sub.add_parser("ipmsg-send", help="send any file to an ipmsg peer")
+    isend.add_argument("ip")
+    isend.add_argument("file")
+    isend.add_argument("text", nargs="?", default="", help="optional message")
+    isend.set_defaults(func=cmd_ipmsg_send)
 
     sg = sub.add_parser("set-gesture", help="choose gesture: two, grab or swipe")
     sg.add_argument("mode", choices=("swipe", "palm", "two", "grab", "canvas"))
