@@ -39,9 +39,9 @@ PICKER_CONFIRM_DELAY = 1.8  # seconds of no swipe before the picker auto-sends
 # Canvas (map) gesture tuning.
 CANVAS_AIM_MIN_MAG = 0.12     # how far the hand must be off-centre to aim
 CANVAS_MAX_ANGLE_DEG = 55     # hand must point within this of a device
-CANVAS_DWELL = 0.6            # hold the aim this long to send
+CANVAS_DWELL = 1.3            # hold the aim this long to send (deliberate hold)
 CANVAS_GRACE_FRAMES = 6       # tolerate this many hand-less frames before hiding
-CANVAS_COOLDOWN = 1.5         # min gap between canvas sends
+CANVAS_COOLDOWN = 2.0         # min gap between canvas sends
 
 
 def _angle_diff(a: float, b: float) -> float:

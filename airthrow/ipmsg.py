@@ -57,14 +57,17 @@ IPMSG_FILE_REGULAR = 0x00000001
 @dataclass
 class IpmsgPeer:
     ip: str
-    user: str = ""
-    host: str = ""
-    group: str = ""
+    user: str = ""      # login user from the packet header
+    host: str = ""      # hostname from the packet header
+    nick: str = ""      # display nickname (from the entry payload)
+    group: str = ""     # group name (from the entry payload)
     last_seen: float = field(default_factory=time.time)
 
     @property
     def label(self) -> str:
-        return self.user or self.host or self.ip
+        """How IP Messenger lists a user: nickname, with group in brackets."""
+        name = self.nick or self.user or self.host or self.ip
+        return f"{name} ({self.group})" if self.group else name
 
 
 def _utf8(s: str) -> bytes:
@@ -281,9 +284,23 @@ class IpmsgClient:
         peer = self._touch_peer(ip, user.decode("utf-8", "replace"),
                                 host.decode("utf-8", "replace"))
 
-        if base in (IPMSG_BR_ENTRY,):
-            # Someone entered: register and answer so they learn about us.
-            self._send(ip, IPMSG_ANSENTRY | IPMSG_UTF8OPT, _utf8(self.user))
+        if base in (IPMSG_BR_ENTRY, IPMSG_ANSENTRY):
+            # Entry/answer payload = "nickname\0group" — the display name and
+            # group IP Messenger shows in its user list.
+            fields = text.split("\x00")
+            nick = fields[0].strip() if fields and fields[0].strip() else ""
+            group = fields[1].strip() if len(fields) > 1 else ""
+            with self._lock:
+                if nick:
+                    peer.nick = nick
+                if group:
+                    peer.group = group
+            if base == IPMSG_BR_ENTRY:
+                # Answer so they learn about us.
+                try:
+                    self._send(ip, IPMSG_ANSENTRY | IPMSG_UTF8OPT, _utf8(self.user))
+                except Exception:
+                    pass
         elif base == IPMSG_BR_EXIT:
             with self._lock:
                 self.peers.pop(ip, None)

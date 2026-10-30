@@ -71,7 +71,7 @@ def cmd_ipmsg_scan(args):
         return
     print(f"\nFound {len(peers)} peer(s):")
     for p in peers:
-        print(f"  {p.ip:16} {p.label}  (host={p.host})")
+        print(f"  {p.ip:16} {p.label}")
 
 
 def cmd_ipmsg_msg(args):
