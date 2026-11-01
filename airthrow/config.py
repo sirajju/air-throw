@@ -66,6 +66,10 @@ class Config:
     devices: list[Peer] = field(default_factory=list)
     # How many total devices before a swipe shows the picker (minimum 2).
     picker_threshold: int = 3
+    # Global keyboard shortcut to start a gesture send session (webcam turns on
+    # on-demand, waits for a swipe, sends, then turns off).
+    hotkey: str = "<ctrl>+<alt>+a"
+    hotkey_enabled: bool = True
 
     # ---- persistence -------------------------------------------------
     @classmethod
@@ -92,6 +96,8 @@ class Config:
             peers=peers,
             devices=[Peer(**d) for d in raw.get("devices", []) if d],
             picker_threshold=max(2, int(raw.get("picker_threshold", 3))),
+            hotkey=raw.get("hotkey", "<ctrl>+<alt>+a"),
+            hotkey_enabled=bool(raw.get("hotkey_enabled", True)),
         )
 
     def save(self) -> None:
@@ -109,6 +115,8 @@ class Config:
             "peers": {slot: asdict(peer) for slot, peer in self.peers.items()},
             "devices": [asdict(d) for d in self.devices],
             "picker_threshold": self.picker_threshold,
+            "hotkey": self.hotkey,
+            "hotkey_enabled": self.hotkey_enabled,
         }
         CONFIG_PATH.write_text(json.dumps(data, indent=2), encoding="utf-8")
 

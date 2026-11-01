@@ -488,6 +488,52 @@ class _Radar:
             pass
 
 
+class _Banner:
+    """A floating top-center notification pill showing that AirThrow send mode
+    is active and watching for a gesture."""
+
+    def __init__(self, manager, root, title: str, subtitle: str):
+        self._mgr = manager
+        self._root = root
+
+        import tkinter as tk
+        self._tk = tk
+
+        sw = root.winfo_screenwidth()
+        pw, ph = 480, 72
+        px = (sw - pw) // 2
+        py = 24
+
+        win = tk.Toplevel(root)
+        win.overrideredirect(True)
+        win.attributes("-topmost", True)
+        try:
+            win.attributes("-alpha", 0.94)
+        except tk.TclError:
+            pass
+        win.geometry(f"{pw}x{ph}+{px}+{py}")
+        win.configure(bg="#15171c", highlightthickness=2, highlightbackground="#00e5c8")
+        _make_click_through(win)
+
+        self._win = win
+        self._lbl_title = tk.Label(win, text=title, bg="#15171c", fg="#00e5c8",
+                                   font=("Segoe UI Semibold", 11))
+        self._lbl_title.pack(pady=(10, 2))
+        self._lbl_sub = tk.Label(win, text=subtitle, bg="#15171c", fg="#b4b9c5",
+                                 font=("Segoe UI", 9))
+        self._lbl_sub.pack()
+
+    def update_text(self, title: str, subtitle: str):
+        self._lbl_title.configure(text=title)
+        self._lbl_sub.configure(text=subtitle)
+
+    def destroy(self):
+        try:
+            self._win.destroy()
+        except Exception:
+            pass
+
+
 class _Manager:
     """Owns the single Tk root + overlay thread; dispatches flash requests."""
 
@@ -501,6 +547,7 @@ class _Manager:
         self._flies: set = set()
         self._selector: _Selector | None = None
         self._radar: _Radar | None = None
+        self._banner: _Banner | None = None
 
     def flash(self, rect, duration: float = DEFAULT_DURATION,
               style: str | None = None) -> None:
@@ -543,6 +590,19 @@ class _Manager:
     def radar_hide(self) -> None:
         if self._thread and self._thread.is_alive():
             self._q.put(("radar_hide",))
+
+    def banner_show(self, title: str, subtitle: str = "") -> None:
+        if not self._ensure_thread():
+            return
+        self._q.put(("banner_show", title, subtitle))
+
+    def banner_update(self, title: str, subtitle: str = "") -> None:
+        if self._thread and self._thread.is_alive():
+            self._q.put(("banner_update", title, subtitle))
+
+    def banner_hide(self) -> None:
+        if self._thread and self._thread.is_alive():
+            self._q.put(("banner_hide",))
 
     def _gradient_for(self, style: str):
         if style not in self._grad_cache:
@@ -621,6 +681,19 @@ class _Manager:
             if self._radar:
                 self._radar.destroy()
                 self._radar = None
+        elif kind == "banner_show":
+            _, title, subtitle = cmd
+            if self._banner:
+                self._banner.destroy()
+            self._banner = _Banner(self, self._root, title, subtitle)
+        elif kind == "banner_update":
+            _, title, subtitle = cmd
+            if self._banner:
+                self._banner.update_text(title, subtitle)
+        elif kind == "banner_hide":
+            if self._banner:
+                self._banner.destroy()
+                self._banner = None
 
     def _done(self, flash: _Flash) -> None:
         self._active.discard(flash)
@@ -677,3 +750,18 @@ def radar_set(index: int) -> None:
 def radar_hide() -> None:
     """Close the canvas map."""
     _manager.radar_hide()
+
+
+def banner_show(title: str, subtitle: str = "") -> None:
+    """Show a floating top-center notification banner."""
+    _manager.banner_show(title, subtitle)
+
+
+def banner_update(title: str, subtitle: str = "") -> None:
+    """Update title/subtitle in the open banner."""
+    _manager.banner_update(title, subtitle)
+
+
+def banner_hide() -> None:
+    """Hide the floating notification banner."""
+    _manager.banner_hide()

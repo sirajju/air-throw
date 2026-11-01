@@ -39,6 +39,7 @@ class Tray:
         self.camera_worker: threading.Thread | None = None
         self.app = AirThrow(self.config, camera_index=camera_index)
         self.icon: pystray.Icon | None = None
+        self.hk = None
 
     # ---- menu --------------------------------------------------------
     def _menu(self) -> pystray.Menu:
@@ -100,6 +101,9 @@ class Tray:
 
     def _quit(self, icon, item):
         self.stop_event.set()
+        if self.hk:
+            self.hk.stop()
+        self.app.cancel_send_session()
         self._stop_camera()
         if self.icon:
             self.icon.stop()
@@ -112,6 +116,16 @@ class Tray:
         if self.camera_on:
             self._start_camera()
 
+        if self.config.hotkey_enabled:
+            try:
+                from .hotkey import HotkeyListener
+
+                self.hk = HotkeyListener(callback=self.app.trigger_send_session,
+                                         hotkey_str=self.config.hotkey)
+                self.hk.start()
+            except Exception as exc:
+                log.warning("Could not start global shortcut in tray: %s", exc)
+
         self.icon = pystray.Icon("AirThrow", _icon_image(), "AirThrow",
                                  menu=self._menu())
         mode = "camera on" if self.camera_on else "receiver-only, webcam off"
@@ -119,6 +133,9 @@ class Tray:
         self.icon.run()  # blocks until _quit stops it
 
         self.stop_event.set()
+        if self.hk:
+            self.hk.stop()
+        self.app.cancel_send_session()
         self._stop_camera()
         log.info("tray exited")
 

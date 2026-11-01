@@ -27,7 +27,7 @@ datas, binaries, hiddenimports = [], [], []
 datas += [("airthrow/assets/hand_landmarker.task", "airthrow/assets")]
 
 # Pull everything (py modules, dynamic libs, data files) for the hard ones.
-for pkg in ("mediapipe", "cv2", "matplotlib", "pystray", "PIL"):
+for pkg in ("mediapipe", "cv2", "matplotlib", "pystray", "PIL", "pynput"):
     d, b, h = collect_all(pkg)
     datas += d
     binaries += b

@@ -73,6 +73,7 @@ class GUI:
         self.v_anim = tk.BooleanVar(value=self.config.show_send_animation)
         self.v_style = tk.StringVar(value=self.config.send_animation_style)
         self.v_preview = tk.BooleanVar(value=False)
+        self.v_hotkey = tk.StringVar(value=self.config.hotkey)
         self.v_camera = tk.IntVar(value=camera_index)
         self.v_peer = {
             slot: (tk.StringVar(), tk.StringVar(), tk.StringVar())  # name, ip, port
@@ -292,6 +293,12 @@ class GUI:
         ttk.Button(camrow, text="Test border", command=self._test_border).pack(
             side="right")
 
+        hkrow = ttk.Frame(beh, style="Card.TFrame"); hkrow.pack(fill="x", pady=(8, 0))
+        ttk.Label(hkrow, text="Global shortcut", style="Card.TLabel", width=12).pack(side="left")
+        ttk.Entry(hkrow, textvariable=self.v_hotkey, width=14).pack(side="left", padx=4)
+        ttk.Button(hkrow, text="Save", command=self._save_hotkey).pack(side="left")
+        ttk.Label(hkrow, text="(press anytime to fling)", style="Muted.TLabel").pack(side="left", padx=6)
+
         # Camera & gesture send controls -------------------------------
         run = self._card(outer, "Camera Gestures (Send)")
         ttk.Label(run, text="Receiver is always listening for incoming throws. "
@@ -301,8 +308,9 @@ class GUI:
         self.start_btn = ttk.Button(rrow, text="Start Camera", style="Accent.TButton",
                                     command=self._toggle_run)
         self.start_btn.pack(side="left")
+        ttk.Button(rrow, text="⚡ Send Now", command=self._trigger_send_now).pack(side="left", padx=6)
         ttk.Checkbutton(rrow, text="Show camera preview", variable=self.v_preview,
-                        command=self._preview_changed).pack(side="left", padx=12)
+                        command=self._preview_changed).pack(side="left", padx=6)
 
         # Live tracking indicator + in-window preview.
         self.track_lbl = ttk.Label(run, text="Camera: stopped (webcam off)",
@@ -362,6 +370,26 @@ class GUI:
             self.config.save()
             self.addr_lbl.configure(text=self._addr_text())
             self._flash_status(f"Device name saved: {name}", OK)
+
+    def _save_hotkey(self):
+        from .hotkey import format_hotkey_display, normalize_hotkey
+
+        val = self.v_hotkey.get().strip()
+        norm = normalize_hotkey(val) if val else "<ctrl>+<alt>+a"
+        self.config.hotkey = norm
+        self.config.save()
+        self.v_hotkey.set(norm)
+        self._flash_status(f"Global shortcut saved: {format_hotkey_display(norm)}", OK)
+
+    def _trigger_send_now(self):
+        if self.app:
+            self.app.trigger_send_session(want_preview=self.v_preview.get())
+        else:
+            # Create a lightweight app instance if camera loop isn't running
+            cfg = Config.load()
+            app = AirThrow(cfg, camera_index=self.v_camera.get(), debug=True)
+            app.trigger_send_session(want_preview=self.v_preview.get())
+        self._flash_status("Send session active — flick left/right to throw", ACCENT)
 
     def _save_settings(self):
         self.config.gesture_mode = self.v_gesture.get()

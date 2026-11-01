@@ -26,6 +26,12 @@ def cmd_run(args):
     run(camera_index=args.camera, debug=args.debug, enable_camera=enable_camera)
 
 
+def cmd_send(args):
+    from .app import send_once
+    send_once(camera_index=args.camera, timeout=args.timeout,
+              want_preview=not args.no_preview, debug=args.debug)
+
+
 def cmd_receive(args):
     from .app import run
     run(enable_camera=False)
@@ -155,20 +161,33 @@ def cmd_selftest(args):
     print(f"OK: hand model loaded and processed a frame (direction={direction}).")
 
 
+def cmd_set_hotkey(args):
+    from .hotkey import format_hotkey_display, normalize_hotkey
+
+    normalized = normalize_hotkey(args.hotkey)
+    cfg = Config.load()
+    cfg.hotkey = normalized
+    cfg.save()
+    print(f"Global shortcut set to: {format_hotkey_display(normalized)} ({normalized})")
+
+
 def cmd_info(args):
+    from .hotkey import format_hotkey_display
+
     cfg = Config.load()
     print(f"AirThrow {__version__}")
-    print(f"  device name : {cfg.device_name}")
-    print(f"  LAN address : {local_ip()}:{cfg.listen_port}")
+    print(f"  device name    : {cfg.device_name}")
+    print(f"  LAN address    : {local_ip()}:{cfg.listen_port}")
     print(f"  peers to add on OTHER machines: --ip {local_ip()} --port {cfg.listen_port}")
     from . import autostart
-    print(f"  gesture     : {cfg.gesture_mode} (swipe = flick; palm = hold open "
+    print(f"  gesture        : {cfg.gesture_mode} (swipe = flick; palm = hold open "
           f"hand to a side; two = two-finger swipe; grab = fist; canvas = map)")
-    print(f"  autostart   : {'on' if autostart.status() else 'off'}")
-    print(f"  sensitivity : {cfg.swipe_min_distance:.2f} (swipe travel needed; lower = easier)")
-    print(f"  auto-open   : {'on' if cfg.auto_open else 'off'} (open received images automatically)")
-    print(f"  resend-block: {cfg.resend_block_seconds:.0f}s (ignore same file->same peer repeats; 0 = off)")
-    print(f"  log file    : {LOG_PATH}")
+    print(f"  autostart      : {'on' if autostart.status() else 'off'}")
+    print(f"  global shortcut: {format_hotkey_display(cfg.hotkey)} ({cfg.hotkey})")
+    print(f"  sensitivity    : {cfg.swipe_min_distance:.2f} (swipe travel needed; lower = easier)")
+    print(f"  auto-open      : {'on' if cfg.auto_open else 'off'} (open received images automatically)")
+    print(f"  resend-block   : {cfg.resend_block_seconds:.0f}s (ignore same file->same peer repeats; 0 = off)")
+    print(f"  log file       : {LOG_PATH}")
 
 
 def cmd_logs(args):
@@ -334,6 +353,14 @@ def build_parser() -> argparse.ArgumentParser:
                    help="run receiver only in foreground (accept throws, webcam off)"
                    ).set_defaults(func=cmd_receive)
 
+    sn = sub.add_parser("send",
+                        help="fling foreground image via gesture (one-shot, opens camera then exits)")
+    sn.add_argument("--camera", type=int, default=0, help="camera index (default 0)")
+    sn.add_argument("--timeout", type=float, default=15.0, help="seconds to wait for gesture")
+    sn.add_argument("--no-preview", action="store_true", help="hide camera preview window")
+    sn.add_argument("--debug", action="store_true", help="verbose logs + overlay")
+    sn.set_defaults(func=cmd_send)
+
     tr = sub.add_parser("tray", help="run in the background with a tray icon (webcam off)")
     tr.add_argument("--camera", type=int, default=0, help="camera index (default 0)")
     tr.add_argument("--with-camera", action="store_true",
@@ -391,6 +418,11 @@ def build_parser() -> argparse.ArgumentParser:
                         help="open received images automatically (on/off)")
     ao.add_argument("state", choices=("on", "off"))
     ao.set_defaults(func=cmd_set_auto_open)
+
+    sh = sub.add_parser("set-hotkey",
+                        help="set global shortcut key (e.g. 'ctrl+alt+a' or '<ctrl>+<alt>+s')")
+    sh.add_argument("hotkey", help="hotkey string, e.g. 'ctrl+alt+a'")
+    sh.set_defaults(func=cmd_set_hotkey)
 
     an = sub.add_parser("set-animation",
                         help="gradient send border on each throw (on/off)")

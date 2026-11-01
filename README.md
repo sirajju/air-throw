@@ -322,13 +322,25 @@ airthrow service uninstall   # remove it
 
 Under the hood the service runs `airthrow daemon` in **receiver-only** mode (no
 webcam access). It listens in the background so you can accept throws anytime
-without turning on your camera. When you want to fling/send images, enable the camera
-on-demand via `airthrow run` in the terminal or `Start Camera` in `airthrow gui`.
+without turning on your camera.
+
+### Global Shortcut (Send on demand)
+
+When you want to fling/throw an open image across the air:
+
+1. **Press the global shortcut**: **`Ctrl+Alt+A`** (on Windows or Linux).
+2. A sleek notification banner appears (`⚡ AirThrow · Ready to throw: <image>`) and your webcam turns on.
+3. **Flick your hand left or right** (or hold open palm toward target).
+4. The image is flung to the peer, the flying animation plays, and the **webcam turns off immediately**.
+5. *Change the shortcut*: `airthrow set-hotkey "<ctrl>+<alt>+s"` (or in the GUI).
+6. *Manual / OS Shortcut*: Run `airthrow send` to trigger a fling session from any terminal, script, or OS custom keybinding.
 
 ## Commands
 
 | Command | What it does |
 |---|---|
+| `send [--timeout S]` | Fling open image via gesture on demand (opens camera, throws, exits) |
+| `set-hotkey <key>` | Set global shortcut (default `ctrl+alt+a`) |
 | `run [--camera N] [--no-camera] [--debug]` | Foreground: camera + gestures + preview (or `--no-camera`) |
 | `receive` | Foreground receiver only (accept throws, webcam off) |
 | `gui [--camera N]` | Open the desktop control-panel window (enable camera on demand) |

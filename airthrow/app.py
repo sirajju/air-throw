@@ -133,6 +133,11 @@ class AirThrow:
         self.camera_ok = False               # True once frames are flowing
         self.receive_only = False            # True when no usable camera
 
+        # On-demand gesture send session (triggered by global shortcut or 'send')
+        self.send_session_active = False
+        self.send_session_stop = threading.Event()
+        self.send_session_thread: threading.Thread | None = None
+
     # ---- status helpers ---------------------------------------------
     def set_status(self, text: str, color=(255, 255, 255), seconds: float = 4.0):
         self.status = text
@@ -418,6 +423,181 @@ class AirThrow:
             self._camera_phase()
         else:
             self._receive_until_stop()
+
+    # ---- on-demand send session (global shortcut / 'airthrow send') --
+    def trigger_send_session(self, timeout: float = 15.0, want_preview: bool = False):
+        """Toggle an on-demand gesture send session (for global hotkey).
+
+        If a session is already active, cancels it immediately.
+        Otherwise, locks the open foreground image, turns on the camera,
+        waits for a fling gesture, sends the file, and turns off the camera.
+        """
+        if self.send_session_active:
+            log.info("Send session: toggle pressed while active -> cancelling")
+            self.cancel_send_session()
+            return
+
+        self.send_session_active = True
+        self.send_session_stop.clear()
+        self.send_session_thread = threading.Thread(
+            target=self._run_send_session,
+            args=(timeout, want_preview),
+            name="airthrow-send-session",
+            daemon=True,
+        )
+        self.send_session_thread.start()
+
+    def cancel_send_session(self):
+        """Cancel an in-progress gesture send session and release the camera."""
+        self.send_session_stop.set()
+        send_overlay.banner_hide()
+        if self.send_session_thread and self.send_session_thread.is_alive():
+            self.send_session_thread.join(timeout=1.5)
+        self.send_session_active = False
+
+    def _run_send_session(self, timeout: float = 15.0, want_preview: bool = False):
+        try:
+            import cv2
+        except ImportError:
+            log.error("Send session failed: OpenCV (cv2) is not installed")
+            return
+
+        cap = None
+        fg = None
+        self.send_session_active = True
+        self.send_session_stop.clear()
+
+        try:
+            # 1. Lock the foreground image immediately
+            self._refresh_foreground_image()
+            img = self.last_image
+            rect = self.last_image_rect
+
+            if img:
+                title = f"⚡ AirThrow · Ready to throw: {img.name}"
+                subtitle = "Flick hand Left / Right to send  ·  Esc or shortcut to cancel"
+            else:
+                title = "⚡ AirThrow · Send mode active"
+                subtitle = "No image detected  ·  Open an image & flick to send  ·  Esc to cancel"
+
+            send_overlay.banner_show(title, subtitle)
+
+            # 2. Open camera on-demand
+            for attempt in range(3):
+                cap, backend = open_camera(self.camera_index)
+                if cap is not None:
+                    break
+                if self.send_session_stop.wait(0.4):
+                    return
+
+            if cap is None:
+                log.warning("Send session: could not open camera %d", self.camera_index)
+                send_overlay.banner_update("Camera unavailable", "Could not access webcam. Esc to close.")
+                time.sleep(2.0)
+                return
+
+            self.detector = self._build_detector()
+            log.info("Send session started: camera %d open, watching for gesture (timeout %.1fs)",
+                     self.camera_index, timeout)
+
+            # Background poller to catch image changes during the session
+            fg = threading.Thread(target=self._foreground_worker, daemon=True)
+            fg.start()
+
+            session_fired = threading.Event()
+
+            def _on_session_throw(direction: str):
+                log.info("Send session gesture detected: %s", direction)
+                target_img = self._held_image or self.last_image or img
+                target_rect = self._held_rect or self.last_image_rect or rect
+                self._held_image = None
+                self._held_rect = None
+                if self.config.use_picker():
+                    self._picker_swipe(direction, target_img, target_rect)
+                else:
+                    self._do_throw(direction, target_img, target_rect)
+                session_fired.set()
+                self.send_session_stop.set()
+
+            if hasattr(self.detector, "on_swipe"):
+                self.detector.on_swipe = _on_session_throw
+            if hasattr(self.detector, "on_throw"):
+                self.detector.on_throw = _on_session_throw
+
+            start_t = time.time()
+            window_open = False
+            last_shown_img = img
+
+            while not self.send_session_stop.is_set():
+                if time.time() - start_t > timeout:
+                    log.info("Send session timed out after %.1fs", timeout)
+                    break
+
+                ok, frame = cap.read()
+                if not ok:
+                    cv2.waitKey(10)
+                    continue
+
+                frame = cv2.flip(frame, 1)
+                frame, direction = self.detector.process(frame)
+                if self.config.gesture_mode == "canvas":
+                    self._canvas_tick()
+
+                if session_fired.is_set():
+                    break
+
+                # If the foreground image changed, update banner
+                if self.last_image != last_shown_img:
+                    last_shown_img = self.last_image
+                    if last_shown_img:
+                        send_overlay.banner_update(
+                            f"⚡ AirThrow · Ready to throw: {last_shown_img.name}", subtitle)
+
+                # Show preview if requested
+                if want_preview:
+                    if not window_open:
+                        cv2.namedWindow(WINDOW_NAME, cv2.WINDOW_AUTOSIZE)
+                        try:
+                            cv2.setWindowProperty(WINDOW_NAME, cv2.WND_PROP_TOPMOST, 1)
+                        except cv2.error:
+                            pass
+                        window_open = True
+                    self._draw_overlay(frame)
+                    cv2.imshow(WINDOW_NAME, frame)
+                    key = cv2.waitKey(1) & 0xFF
+                    if key in (27, ord("q")):
+                        log.info("Send session cancelled by user key")
+                        break
+                else:
+                    time.sleep(0.01)
+
+        except Exception as exc:
+            log.error("Send session error: %s", exc)
+        finally:
+            self.send_session_active = False
+            self.send_session_stop.set()
+            send_overlay.banner_hide()
+            if self._canvas_shown:
+                send_overlay.radar_hide()
+                self._canvas_shown = False
+            if self.detector:
+                try:
+                    self.detector.close()
+                except Exception:
+                    pass
+            if cap is not None:
+                try:
+                    cap.release()
+                except Exception:
+                    pass
+            try:
+                import cv2
+                cv2.destroyAllWindows()
+            except Exception:
+                pass
+            if fg is not None:
+                fg.join(timeout=0.6)
+            log.info("Send session finished (camera released)")
 
     def _serve(self):
         transfer.on_received = self.on_received
@@ -712,6 +892,8 @@ def run(camera_index: int = 0, debug: bool = False, enable_camera: bool = True):
 
 def run_daemon(camera_index: int = 0, with_camera: bool = False):
     """Headless background run: receiver by default (no camera access).
+    Listens for the global shortcut (default Ctrl+Alt+A) to trigger an on-demand
+    send session, then turns the camera back off.
     Stops cleanly on SIGINT/SIGTERM (so a service manager can stop it)."""
     import signal
 
@@ -720,6 +902,7 @@ def run_daemon(camera_index: int = 0, with_camera: bool = False):
 
     def _handle(*_):
         stop.set()
+        app.cancel_send_session()
 
     for name in ("SIGINT", "SIGTERM", "SIGBREAK"):
         sig = getattr(signal, name, None)
@@ -731,5 +914,31 @@ def run_daemon(camera_index: int = 0, with_camera: bool = False):
 
     mode_str = "with camera gesture detection" if with_camera else "receiver-only (webcam off)"
     log.info("daemon starting (%s)", mode_str)
-    app.start_background(stop, lambda: False, lambda: None, enable_camera=with_camera)
+
+    # Start global hotkey listener so user can press shortcut to fling
+    hk = None
+    if app.config.hotkey_enabled:
+        try:
+            from .hotkey import HotkeyListener
+
+            hk = HotkeyListener(callback=app.trigger_send_session, hotkey_str=app.config.hotkey)
+            hk.start()
+        except Exception as exc:
+            log.warning("Could not initialize global shortcut listener: %s", exc)
+
+    try:
+        app.start_background(stop, lambda: False, lambda: None, enable_camera=with_camera)
+    finally:
+        if hk:
+            hk.stop()
+        app.cancel_send_session()
     log.info("daemon stopped")
+
+
+def send_once(camera_index: int = 0, timeout: float = 15.0, want_preview: bool = True, debug: bool = False):
+    """Run an on-demand gesture send session from CLI ('airthrow send'):
+    locks open image, turns on camera, flings on gesture, and exits."""
+    cfg = Config.load()
+    app = AirThrow(cfg, camera_index=camera_index, debug=debug)
+    app._serve()
+    app._run_send_session(timeout=timeout, want_preview=want_preview)

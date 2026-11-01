@@ -7,4 +7,5 @@ requests>=2.31
 psutil>=5.9
 pystray>=0.19
 pillow>=10.0
+pynput>=1.7.6
 pywin32>=306 ; sys_platform == "win32"
