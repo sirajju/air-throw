@@ -320,19 +320,21 @@ airthrow service uninstall   # remove it
   need your desktop session, so a session-0 Windows Service can't be used) and
   launches it immediately in the background.
 
-Under the hood the service runs `airthrow daemon` — a **headless** mode (no
-window, no tray) that just receives and, if a webcam is present, watches for
-gestures. It works for both the standalone executables and a from-source install.
+Under the hood the service runs `airthrow daemon` in **receiver-only** mode (no
+webcam access). It listens in the background so you can accept throws anytime
+without turning on your camera. When you want to fling/send images, enable the camera
+on-demand via `airthrow run` in the terminal or `Start Camera` in `airthrow gui`.
 
 ## Commands
 
 | Command | What it does |
 |---|---|
-| `run [--camera N] [--debug]` | Foreground: camera + gestures + preview window |
-| `gui [--camera N]` | Open the desktop control-panel window |
-| `tray [--camera N]` | Background: run with a system-tray icon (no console) |
-| `daemon [--camera N]` | Headless background run (no window/tray) |
-| `service <install\|uninstall\|status>` | Background service, auto-start on login |
+| `run [--camera N] [--no-camera] [--debug]` | Foreground: camera + gestures + preview (or `--no-camera`) |
+| `receive` | Foreground receiver only (accept throws, webcam off) |
+| `gui [--camera N]` | Open the desktop control-panel window (enable camera on demand) |
+| `tray [--camera N] [--with-camera]` | Background tray app (webcam off by default; toggleable) |
+| `daemon [--with-camera]` | Headless receiver background run (webcam off by default) |
+| `service <install\|uninstall\|status>` | Background receiver service, auto-start on login |
 | `set-gesture <swipe\|palm\|two\|grab\|canvas>` | Choose the gesture style (default swipe) |
 | `autostart <on\|off\|status>` | Start the tray app automatically on login |
 | `info` | Show this device's name, IP, port, settings and log path |

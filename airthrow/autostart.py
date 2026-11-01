@@ -51,11 +51,20 @@ def _launch_target(subcmd: str = "tray", windowless: bool = True):
 
     # From source: use the venv's python (pythonw on Windows for no console).
     py = sys.executable
+    repo = _repo_dir()
+    if repo:
+        venv_py = repo / (".venv/Scripts/python.exe" if IS_WIN else ".venv/bin/python")
+        if not venv_py.exists():
+            # Check default install location (~/AirThrow/.venv)
+            alt_venv = Path.home() / "AirThrow" / (".venv/Scripts/python.exe" if IS_WIN else ".venv/bin/python")
+            if alt_venv.exists():
+                venv_py = alt_venv
+        if venv_py.exists():
+            py = str(venv_py)
     if IS_WIN and windowless:
         pyw = Path(py).with_name("pythonw.exe")
         if pyw.exists():
             py = str(pyw)
-    repo = _repo_dir()
     return py, ["-m", "airthrow", subcmd], str(repo) if repo else os.getcwd()
 
 
@@ -77,19 +86,19 @@ def _win_shortcut_path() -> Path:
     return startup / f"{APP_NAME}.lnk"
 
 
-def _win_enable() -> str:
+def _win_enable(subcmd: str = "tray") -> str:
     import win32com.client  # from pywin32
 
     lnk = _win_shortcut_path()
     lnk.parent.mkdir(parents=True, exist_ok=True)
-    prog, args, workdir = _launch_target("tray")
+    prog, args, workdir = _launch_target(subcmd)
     shell = win32com.client.Dispatch("WScript.Shell")
     shortcut = shell.CreateShortcut(str(lnk))
     shortcut.TargetPath = prog
     shortcut.Arguments = " ".join(args)
     # Working dir = repo so `-m airthrow` resolves for source installs.
     shortcut.WorkingDirectory = workdir
-    shortcut.Description = "AirThrow — throw images across the air"
+    shortcut.Description = "AirThrow — background receiver for image throws"
     shortcut.Save()
     return str(lnk)
 
@@ -190,7 +199,7 @@ def _linux_service_install() -> str:
     env_line = f"Environment=PYTHONPATH={workdir}\n" if _repo_dir() else ""
     unit = (
         "[Unit]\n"
-        "Description=AirThrow background agent (receive + gestures)\n"
+        "Description=AirThrow background receiver (LAN transfers)\n"
         "After=graphical-session.target\n\n"
         "[Service]\n"
         f"ExecStart={exec_line}\n"
@@ -238,8 +247,8 @@ def _linux_service_status() -> str:
 
 def _win_service_install() -> str:
     # Start at login (hidden), and launch it now in the background.
-    lnk = _win_enable()
-    prog, args, workdir = _launch_target("tray")
+    lnk = _win_enable(subcmd="daemon")
+    prog, args, workdir = _launch_target("daemon", windowless=True)
     try:
         DETACHED = 0x00000008  # DETACHED_PROCESS
         subprocess.Popen([prog, *args], cwd=workdir, close_fds=True,
@@ -260,7 +269,7 @@ def _win_service_status() -> str:
         for p in psutil.process_iter(["name", "cmdline"]):
             name = (p.info.get("name") or "").lower()
             cmd = " ".join(p.info.get("cmdline") or []).lower()
-            if "airthrow-tray" in name or ("airthrow" in cmd and "tray" in cmd):
+            if "airthrow" in cmd and ("daemon" in cmd or "tray" in cmd):
                 running = True
                 break
     except Exception:

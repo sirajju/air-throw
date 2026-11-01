@@ -116,14 +116,16 @@ if ($userPath -notlike "*$BinDir*") {
 
 Say "Installed to $Dir"
 
-# --- background service (auto-start on login) --------------------------------
+# --- background receiver service (auto-start on login) -----------------------
 # On by default; set $env:AIRTHROW_NO_SERVICE = "1" to skip.
+# The service runs in receiver-only mode: webcam is OFF, listening for throws.
 if (-not $env:AIRTHROW_NO_SERVICE) {
-    Say "Enabling background service (auto-start on login)..."
+    Say "Enabling background receiver service (auto-start on login, webcam off)..."
     try { & $Cmd service install } catch { Write-Host "  (run 'airthrow service install' later)" }
 }
 
 Write-Host ""
-Write-Host "Next (in a new terminal):  airthrow info  |  airthrow gui  |  airthrow run"
+Write-Host "Receiver is active in background (webcam is OFF, ready to accept throws)."
+Write-Host "To send images:  airthrow gui (click 'Start Camera')  or  airthrow run"
 Write-Host "Background service:  airthrow service status | uninstall"
 Write-Host "Update later: re-run this installer, or  git -C `"$Dir`" pull"

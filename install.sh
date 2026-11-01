@@ -94,10 +94,11 @@ chmod +x "$LAUNCHER"
 say "Installed to $DIR"
 say "Launcher: $LAUNCHER"
 
-# --- background service (auto-start on login) --------------------------------
+# --- background receiver service (auto-start on login) -----------------------
 # On by default; set AIRTHROW_NO_SERVICE=1 to skip.
+# The service runs in receiver-only mode: webcam is OFF, listening for throws.
 if [ -z "${AIRTHROW_NO_SERVICE:-}" ]; then
-    say "Enabling background service (auto-start on login)..."
+    say "Enabling background receiver service (auto-start on login, webcam off)..."
     "$LAUNCHER" service install || \
         echo "  (couldn't enable the service — run 'airthrow service install' later)"
 fi
@@ -107,6 +108,7 @@ case ":$PATH:" in
     *) echo "   Add this to your shell profile:  export PATH=\"\$HOME/.local/bin:\$PATH\"" ;;
 esac
 echo
-echo "Next:  airthrow info   |   airthrow gui   |   airthrow run"
+echo "Receiver is active in background (webcam is OFF, ready to accept throws)."
+echo "To send images:  airthrow gui (click 'Start Camera')  or  airthrow run"
 echo "Background service:  airthrow service status | uninstall"
 echo "Update later: re-run this installer, or  git -C \"$DIR\" pull"

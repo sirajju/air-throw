@@ -86,9 +86,28 @@ class GUI:
                 n.set(peer.name); ip.set(peer.ip); port.set(str(peer.port))
 
         self._build_ui()
+        self._ensure_receiver()
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
         self._poll_status()
         self._poll_preview()
+
+    def _ensure_receiver(self):
+        """Make sure the receiver is active so this device can accept throws
+        even while the camera is off."""
+        transfer.on_received = self._on_received_gui
+        transfer.start_receiver(self.config)
+
+    def _on_received_gui(self, sender: str, filename: str, path, direction: str = ""):
+        self.root.after(0, lambda: self._flash_status(f"Received {filename} from {sender}", OK))
+        if self.config.show_send_animation:
+            try:
+                from_dir = {"right": "left", "left": "right"}.get(direction, "right")
+                send_overlay.fly_in(path, from_dir)
+                send_overlay.flash(None, style=send_overlay.RECEIVE_STYLE)
+            except Exception as exc:
+                log.debug("receive animation failed: %s", exc)
+        if self.config.auto_open:
+            open_with_default_app(path)
 
     # ---- styling -----------------------------------------------------
     def _build_styles(self):
@@ -273,23 +292,26 @@ class GUI:
         ttk.Button(camrow, text="Test border", command=self._test_border).pack(
             side="right")
 
-        # Run controls -------------------------------------------------
-        run = self._card(outer, "Run")
+        # Camera & gesture send controls -------------------------------
+        run = self._card(outer, "Camera Gestures (Send)")
+        ttk.Label(run, text="Receiver is always listening for incoming throws. "
+                  "Start the camera only when you want to fling/send images.",
+                  style="Muted.TLabel", wraplength=400).pack(anchor="w", pady=(0, 8))
         rrow = ttk.Frame(run, style="Card.TFrame"); rrow.pack(fill="x")
-        self.start_btn = ttk.Button(rrow, text="Start", style="Accent.TButton",
+        self.start_btn = ttk.Button(rrow, text="Start Camera", style="Accent.TButton",
                                     command=self._toggle_run)
         self.start_btn.pack(side="left")
         ttk.Checkbutton(rrow, text="Show camera preview", variable=self.v_preview,
                         command=self._preview_changed).pack(side="left", padx=12)
 
         # Live tracking indicator + in-window preview.
-        self.track_lbl = ttk.Label(run, text="Camera: stopped",
+        self.track_lbl = ttk.Label(run, text="Camera: stopped (webcam off)",
                                    style="Muted.TLabel")
         self.track_lbl.pack(anchor="w", pady=(10, 4))
         self.preview_label = tk.Label(run, bg="#000000", width=48, height=14)
         self.preview_label.pack(fill="x")
-        self._set_preview_placeholder("Press Start, then tick “Show camera "
-                                      "preview”")
+        self._set_preview_placeholder("Camera is off — click “Start Camera” "
+                                      "to enable gesture sending")
 
         arow = ttk.Frame(run, style="Card.TFrame"); arow.pack(fill="x", pady=(10, 0))
         ttk.Button(arow, text="Open received folder",
@@ -538,11 +560,12 @@ class GUI:
             target=self.app.start_background,
             args=(self.stop_event, lambda: self.v_preview.get(),
                   self._preview_hidden, self._frame_sink),
+            kwargs={"enable_camera": True},
             name="airthrow-camera", daemon=True)
         self.worker.start()
         self.running = True
-        self.start_btn.configure(text="Stop")
-        self._flash_status("Running — camera + receiver started", OK)
+        self.start_btn.configure(text="Stop Camera")
+        self._flash_status("Camera started — watching for gestures", OK)
 
     def _frame_sink(self, frame):
         # Called from the camera thread; just stash the latest frame (atomic).
@@ -556,10 +579,10 @@ class GUI:
         self.running = False
         self.app = None
         self._latest_frame = None
-        self.track_lbl.configure(text="Camera: stopped")
-        self._set_preview_placeholder("Stopped")
-        self.start_btn.configure(text="Start")
-        self._flash_status("Stopped", MUTED)
+        self.track_lbl.configure(text="Camera: stopped (webcam off)")
+        self._set_preview_placeholder("Camera is off — click “Start Camera” to enable gesture sending")
+        self.start_btn.configure(text="Start Camera")
+        self._flash_status("Camera stopped — receiver remains active", MUTED)
 
     def _preview_changed(self):
         if not self.v_preview.get():
@@ -618,7 +641,7 @@ class GUI:
     def _tracking_text(self) -> str:
         app = self.app
         if not app:
-            return "Camera: stopped"
+            return "Camera: stopped (webcam off)"
         if getattr(app, "receive_only", False):
             return ("No camera available — receive-only. Close other apps or "
                     "AirThrow windows using the webcam, or change the Camera index.")

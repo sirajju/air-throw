@@ -20,13 +20,9 @@ import threading
 import time
 from pathlib import Path
 
-import cv2
-
 from . import send_overlay, transfer
 from .config import Config, local_ip
 from .foreground_image import current_image, foreground_rect, foreground_window
-from .gestures import (BaseHandDetector, CanvasDetector, GrabDetector,
-                       PalmReachDetector, SwipeDetector, TwoFingerDetector)
 from .logs import LOG_PATH, get_logger
 
 log = get_logger()
@@ -58,6 +54,11 @@ def open_camera(index: int):
 
     Returns (cap, backend_name) or (None, reason).
     """
+    try:
+        import cv2
+    except ImportError:
+        return None, "OpenCV (cv2) is not installed"
+
     if sys.platform.startswith("win"):
         backends = [("DSHOW", cv2.CAP_DSHOW), ("MSMF", cv2.CAP_MSMF),
                     ("ANY", cv2.CAP_ANY)]
@@ -369,7 +370,9 @@ class AirThrow:
             self.set_status(f"Failed -> {peer.name}: {exc}", (0, 0, 255), 8)
 
     # ---- detector ----------------------------------------------------
-    def _build_detector(self) -> BaseHandDetector:
+    def _build_detector(self):
+        from .gestures import (CanvasDetector, GrabDetector,
+                               PalmReachDetector, SwipeDetector, TwoFingerDetector)
         dist = self.config.swipe_min_distance
         mode = self.config.gesture_mode
         if mode == "grab":
@@ -385,27 +388,36 @@ class AirThrow:
         return SwipeDetector(on_swipe=self.on_throw, min_distance=dist)
 
     # ---- entry points ------------------------------------------------
-    def run(self):
-        """Foreground CLI: preview window on, q/ESC quits."""
+    def run(self, enable_camera: bool = True):
+        """Foreground CLI: preview window on (if camera enabled), q/ESC quits."""
         self._stop = threading.Event()
         self._preview_fn = lambda: True
         self._quit_on_key = True
         self._serve()
-        self._camera_phase()
+        if enable_camera:
+            self._camera_phase()
+        else:
+            self._receive_until_stop()
 
     def start_background(self, stop_event: threading.Event,
-                         preview_fn, on_preview_key, frame_sink=None):
+                         preview_fn, on_preview_key, frame_sink=None,
+                         enable_camera: bool = False):
         """Tray/daemon/GUI: shared stop Event, preview toggled on demand.
 
         If `frame_sink` is given, annotated frames are handed to it (the GUI
-        draws them in-window) instead of opening an OpenCV window."""
+        draws them in-window) instead of opening an OpenCV window.
+        By default `enable_camera` is False so background tasks only act as
+        a receiver without touching the webcam."""
         self._stop = stop_event
         self._preview_fn = preview_fn
         self._quit_on_key = False
         self._on_preview_key = on_preview_key
         self._frame_sink = frame_sink
         self._serve()
-        self._camera_phase()
+        if enable_camera:
+            self._camera_phase()
+        else:
+            self._receive_until_stop()
 
     def _serve(self):
         transfer.on_received = self.on_received
@@ -451,7 +463,11 @@ class AirThrow:
             if self.detector:
                 self.detector.close()
             cap.release()
-            cv2.destroyAllWindows()
+            try:
+                import cv2
+                cv2.destroyAllWindows()
+            except Exception:
+                pass
             fg.join(timeout=1)
             log.info("stopped")
 
@@ -531,11 +547,12 @@ class AirThrow:
                 window_open = False
 
     def _receive_until_stop(self):
-        """No usable camera: keep accepting throws. Sending needs a webcam."""
+        """Receiver-only mode: keep accepting throws. No webcam is accessed."""
         self.receive_only = True
-        log.warning(
-            "camera %d unavailable — RECEIVE-ONLY. Can accept throws but cannot "
-            "send (gestures need a webcam).", self.camera_index)
+        log.info(
+            "Receiver-only mode active on %s:%d as '%s'. Webcam is OFF.",
+            local_ip(), self.config.listen_port, self.config.device_name)
+        self.set_status(f"Receiving on {self.config.listen_port} (webcam off)", (0, 220, 0))
         while not self._stop.is_set():
             self._stop.wait(0.5)
 
@@ -650,6 +667,12 @@ class AirThrow:
 
 def probe_cameras(max_index: int = 4) -> None:
     """Report which camera indices actually deliver frames (diagnostic)."""
+    try:
+        import cv2
+    except ImportError:
+        print("OpenCV (cv2) is not installed.")
+        return
+
     print("Probing cameras (index 0..%d)..." % (max_index - 1))
     found = False
     for index in range(max_index):
@@ -683,12 +706,12 @@ def open_with_default_app(path: Path) -> None:
         log.warning("could not auto-open %s: %s", path, exc)
 
 
-def run(camera_index: int = 0, debug: bool = False):
-    AirThrow(Config.load(), camera_index=camera_index, debug=debug).run()
+def run(camera_index: int = 0, debug: bool = False, enable_camera: bool = True):
+    AirThrow(Config.load(), camera_index=camera_index, debug=debug).run(enable_camera=enable_camera)
 
 
-def run_daemon(camera_index: int = 0):
-    """Headless background run: receiver + gestures, no preview, no tray.
+def run_daemon(camera_index: int = 0, with_camera: bool = False):
+    """Headless background run: receiver by default (no camera access).
     Stops cleanly on SIGINT/SIGTERM (so a service manager can stop it)."""
     import signal
 
@@ -706,6 +729,7 @@ def run_daemon(camera_index: int = 0):
             except (ValueError, OSError):
                 pass  # not on the main thread / unsupported
 
-    log.info("daemon starting (headless background)")
-    app.start_background(stop, lambda: False, lambda: None)
+    mode_str = "with camera gesture detection" if with_camera else "receiver-only (webcam off)"
+    log.info("daemon starting (%s)", mode_str)
+    app.start_background(stop, lambda: False, lambda: None, enable_camera=with_camera)
     log.info("daemon stopped")

@@ -29,24 +29,61 @@ def _icon_image() -> Image.Image:
 
 
 class Tray:
-    def __init__(self, camera_index: int = 0):
+    def __init__(self, camera_index: int = 0, camera_on: bool = False):
         self.config = Config.load()
-        self.app = AirThrow(self.config, camera_index=camera_index)
+        self.camera_index = camera_index
+        self.camera_on = camera_on
         self.preview_on = False
         self.stop_event = threading.Event()
+        self.camera_stop = threading.Event()
+        self.camera_worker: threading.Thread | None = None
+        self.app = AirThrow(self.config, camera_index=camera_index)
         self.icon: pystray.Icon | None = None
 
     # ---- menu --------------------------------------------------------
     def _menu(self) -> pystray.Menu:
         return pystray.Menu(
-            pystray.MenuItem(lambda item: self.app.status, None, enabled=False),
+            pystray.MenuItem(lambda item: self._status_text(), None, enabled=False),
             pystray.Menu.SEPARATOR,
+            pystray.MenuItem("Enable camera gestures", self._toggle_camera,
+                             checked=lambda item: self.camera_on),
             pystray.MenuItem("Show preview", self._toggle_preview,
-                             checked=lambda item: self.preview_on),
+                             checked=lambda item: self.preview_on,
+                             enabled=lambda item: self.camera_on),
             pystray.MenuItem("Open received folder", self._open_received),
             pystray.Menu.SEPARATOR,
             pystray.MenuItem("Quit", self._quit),
         )
+
+    def _status_text(self) -> str:
+        if self.camera_on:
+            return self.app.status
+        return f"Receiver active (port {self.config.listen_port}, webcam off)"
+
+    def _toggle_camera(self, icon, item):
+        self.camera_on = not self.camera_on
+        if self.camera_on:
+            self._start_camera()
+        else:
+            self._stop_camera()
+        if self.icon:
+            self.icon.update_menu()
+
+    def _start_camera(self):
+        self.camera_stop.clear()
+        self.app._stop = self.camera_stop
+        self.camera_worker = threading.Thread(
+            target=self.app._camera_phase,
+            name="airthrow-camera", daemon=True,
+        )
+        self.camera_worker.start()
+
+    def _stop_camera(self):
+        self.camera_stop.set()
+        self.preview_on = False
+        if self.camera_worker:
+            self.camera_worker.join(timeout=2)
+            self.camera_worker = None
 
     def _toggle_preview(self, icon, item):
         self.preview_on = not self.preview_on
@@ -63,28 +100,29 @@ class Tray:
 
     def _quit(self, icon, item):
         self.stop_event.set()
+        self._stop_camera()
         if self.icon:
             self.icon.stop()
 
     # ---- run ---------------------------------------------------------
     def run(self):
-        worker = threading.Thread(
-            target=self.app.start_background,
-            args=(self.stop_event, lambda: self.preview_on, self._hide_preview),
-            name="airthrow-camera", daemon=True,
-        )
-        worker.start()
+        self.app._serve()
+        self.app._preview_fn = lambda: self.preview_on
+        self.app._on_preview_key = self._hide_preview
+        if self.camera_on:
+            self._start_camera()
 
         self.icon = pystray.Icon("AirThrow", _icon_image(), "AirThrow",
                                  menu=self._menu())
-        log.info("tray started")
+        mode = "camera on" if self.camera_on else "receiver-only, webcam off"
+        log.info("tray started (%s)", mode)
         self.icon.run()  # blocks until _quit stops it
 
         self.stop_event.set()
-        worker.join(timeout=3)
+        self._stop_camera()
         log.info("tray exited")
 
 
-def run_tray(camera_index: int = 0):
+def run_tray(camera_index: int = 0, camera_on: bool = False):
     setup_logging(debug=False)
-    Tray(camera_index=camera_index).run()
+    Tray(camera_index=camera_index, camera_on=camera_on).run()

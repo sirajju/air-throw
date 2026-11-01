@@ -22,12 +22,18 @@ from .logs import LOG_PATH, setup_logging
 
 def cmd_run(args):
     from .app import run  # imported lazily so config commands don't need cv2
-    run(camera_index=args.camera, debug=args.debug)
+    enable_camera = not getattr(args, "no_camera", False)
+    run(camera_index=args.camera, debug=args.debug, enable_camera=enable_camera)
+
+
+def cmd_receive(args):
+    from .app import run
+    run(enable_camera=False)
 
 
 def cmd_tray(args):
     from .tray import run_tray
-    run_tray(camera_index=args.camera)
+    run_tray(camera_index=args.camera, camera_on=getattr(args, "with_camera", False))
 
 
 def cmd_gui(args):
@@ -37,15 +43,17 @@ def cmd_gui(args):
 
 def cmd_daemon(args):
     from .app import run_daemon
-    run_daemon(camera_index=args.camera)
+    run_daemon(camera_index=args.camera, with_camera=getattr(args, "with_camera", False))
 
 
 def cmd_service(args):
     from . import autostart
     if args.action == "install":
         where = autostart.service_install()
-        print(f"Service installed and started -> {where}")
-        print("It will start automatically on login. Check: airthrow service status")
+        print(f"Receiver service installed and started -> {where}")
+        print("Runs headlessly in the background (receiver-only, webcam is OFF).")
+        print("To send files via gestures, use 'airthrow run' or 'airthrow gui'.")
+        print("Check: airthrow service status")
     elif args.action == "uninstall":
         ok = autostart.service_uninstall()
         print("Service removed." if ok else "Service was not installed.")
@@ -316,12 +324,20 @@ def build_parser() -> argparse.ArgumentParser:
 
     r = sub.add_parser("run", help="start camera + gestures + receiver")
     r.add_argument("--camera", type=int, default=0, help="camera index (default 0)")
+    r.add_argument("--no-camera", action="store_true",
+                   help="receiver-only mode (do not access webcam)")
     r.add_argument("--debug", action="store_true",
                    help="verbose logs + on-screen diagnostic overlay")
     r.set_defaults(func=cmd_run)
 
-    tr = sub.add_parser("tray", help="run in the background with a tray icon")
+    sub.add_parser("receive",
+                   help="run receiver only in foreground (accept throws, webcam off)"
+                   ).set_defaults(func=cmd_receive)
+
+    tr = sub.add_parser("tray", help="run in the background with a tray icon (webcam off)")
     tr.add_argument("--camera", type=int, default=0, help="camera index (default 0)")
+    tr.add_argument("--with-camera", action="store_true",
+                    help="start with camera gesture detection enabled (default: receiver-only)")
     tr.set_defaults(func=cmd_tray)
 
     g = sub.add_parser("gui", help="open the desktop control-panel window")
@@ -329,8 +345,10 @@ def build_parser() -> argparse.ArgumentParser:
     g.set_defaults(func=cmd_gui)
 
     dm = sub.add_parser("daemon",
-                        help="run headless in the background (no window/tray)")
-    dm.add_argument("--camera", type=int, default=0, help="camera index (default 0)")
+                        help="run headless receiver in background (no camera)")
+    dm.add_argument("--with-camera", action="store_true",
+                    help="also enable camera gesture detection (default: receiver-only, no camera)")
+    dm.add_argument("--camera", type=int, default=0, help="camera index (if --with-camera is used)")
     dm.set_defaults(func=cmd_daemon)
 
     sv = sub.add_parser("service",

@@ -63,8 +63,33 @@ def _unique_path(path: Path) -> Path:
         i += 1
 
 
-def start_receiver(config: Config) -> threading.Thread:
-    """Launch the receiver in a daemon thread and return it."""
+def is_receiver_running(port: int = 8720) -> bool:
+    """True if an AirThrow receiver is already listening on this machine."""
+    return check_peer(f"http://127.0.0.1:{port}")
+
+
+def is_port_in_use(port: int) -> bool:
+    """True if any process is listening on the local port."""
+    import socket
+
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        return s.connect_ex(("127.0.0.1", port)) == 0
+
+
+def start_receiver(config: Config) -> threading.Thread | None:
+    """Launch the receiver in a daemon thread and return it.
+
+    If an AirThrow receiver is already active on this port (e.g. via the background
+    service), reuses it and returns None.
+    """
+    if is_receiver_running(config.listen_port):
+        log.info("AirThrow receiver already active on port %d", config.listen_port)
+        return None
+    if is_port_in_use(config.listen_port):
+        log.warning("Port %d is already in use by another application. Incoming transfers may fail.",
+                    config.listen_port)
+        return None
+
     app = build_app(config)
     server = uvicorn.Server(
         uvicorn.Config(app, host="0.0.0.0", port=config.listen_port, log_level="warning")
