@@ -27,6 +27,24 @@ from .logs import LOG_PATH, get_logger
 
 log = get_logger()
 
+# OpenCV is heavy, so it is NOT imported at module load — receive-only mode
+# starts without paying for it. _ensure_cv2() loads it on first camera use and
+# sets this module-level name, which all the cv2.* references below use.
+cv2 = None
+
+
+def _ensure_cv2():
+    """Import OpenCV on demand; returns the module, or None if unavailable."""
+    global cv2
+    if cv2 is None:
+        try:
+            import cv2 as _cv2
+            cv2 = _cv2
+        except ImportError:
+            return None
+    return cv2
+
+
 WINDOW_NAME = "AirThrow"
 POLL_EVERY = 8  # frames between foreground-image checks (~3-4x/sec)
 PICKER_CONFIRM_DELAY = 1.8  # seconds of no swipe before the picker auto-sends
@@ -54,9 +72,7 @@ def open_camera(index: int):
 
     Returns (cap, backend_name) or (None, reason).
     """
-    try:
-        import cv2
-    except ImportError:
+    if _ensure_cv2() is None:
         return None, "OpenCV (cv2) is not installed"
 
     if sys.platform.startswith("win"):
@@ -456,9 +472,7 @@ class AirThrow:
         self.send_session_active = False
 
     def _run_send_session(self, timeout: float = 15.0, want_preview: bool = False):
-        try:
-            import cv2
-        except ImportError:
+        if _ensure_cv2() is None:
             log.error("Send session failed: OpenCV (cv2) is not installed")
             return
 
@@ -591,8 +605,8 @@ class AirThrow:
                 except Exception:
                     pass
             try:
-                import cv2
-                cv2.destroyAllWindows()
+                if cv2:
+                    cv2.destroyAllWindows()
             except Exception:
                 pass
             if fg is not None:
@@ -644,8 +658,8 @@ class AirThrow:
                 self.detector.close()
             cap.release()
             try:
-                import cv2
-                cv2.destroyAllWindows()
+                if cv2:
+                    cv2.destroyAllWindows()
             except Exception:
                 pass
             fg.join(timeout=1)
@@ -847,9 +861,7 @@ class AirThrow:
 
 def probe_cameras(max_index: int = 4) -> None:
     """Report which camera indices actually deliver frames (diagnostic)."""
-    try:
-        import cv2
-    except ImportError:
+    if _ensure_cv2() is None:
         print("OpenCV (cv2) is not installed.")
         return
 
