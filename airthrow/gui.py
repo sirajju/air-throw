@@ -20,7 +20,7 @@ from tkinter import ttk
 
 from PIL import Image, ImageTk
 
-from . import DEFAULT_PORT, __version__, send_overlay
+from . import DEFAULT_PORT, __version__, send_overlay, transfer
 from .send_overlay import STYLE_NAMES
 from .app import AirThrow, open_with_default_app
 from .config import RECEIVED_DIR, SLOTS, Config, local_ip
