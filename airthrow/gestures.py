@@ -86,6 +86,25 @@ def is_fist(lm) -> bool:
     return extended_finger_count(lm) <= 1
 
 
+RAISED_MIN_SIZE = 0.09   # wrist->knuckle span; smaller = far away / edge-on
+RAISED_UPRIGHT = 1.0     # fingertip must be this many hand-sizes ABOVE the wrist
+
+
+def is_raised_palm(lm) -> bool:
+    """An open hand deliberately RAISED facing the camera — not one resting on
+    the desk. A desk hand is horizontal (fingertips level with the wrist) and
+    often edge-on (tiny apparent size); a raised palm points up and fills more
+    of the frame. Used to gate things that should only trigger on intent,
+    like opening the canvas map."""
+    if not is_open_hand(lm):
+        return False
+    size = _dist(lm[0], lm[9])           # wrist -> middle knuckle
+    if size < RAISED_MIN_SIZE:
+        return False                     # too small: far away or edge-on
+    # Fingers up: middle fingertip clearly above the wrist (y grows downward).
+    return (lm[0].y - lm[12].y) > RAISED_UPRIGHT * size
+
+
 def is_open_hand(lm) -> bool:
     return extended_finger_count(lm) >= 3
 
@@ -118,6 +137,7 @@ class BaseHandDetector:
         self.grabbed = False      # set by GrabDetector; always False for swipe
         self.fingers = 0
         self.open_hand = False    # True while the hand is an open palm
+        self.raised = False       # open palm deliberately raised to the camera
 
         options = vision.HandLandmarkerOptions(
             base_options=mp_python.BaseOptions(
@@ -158,6 +178,7 @@ class BaseHandDetector:
             self.palm_y = lm[9].y
             self.fingers = extended_finger_count(lm)
             self.open_hand = is_open_hand(lm)
+            self.raised = is_raised_palm(lm)
             direction = self._update(lm, now)
             colour = (0, 220, 0) if self.grabbed else (0, 220, 255)
             _draw_hand(frame_bgr, lm, colour)
@@ -166,6 +187,7 @@ class BaseHandDetector:
             self.palm_x = None
             self.palm_y = None
             self.open_hand = False
+            self.raised = False
             self.cur_dx = 0.0
             self.cur_dt = 0.0
             self.fingers = 0

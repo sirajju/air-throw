@@ -56,6 +56,7 @@ CANVAS_AIM_MIN_MAG = 0.12     # how far the hand must be off-centre to aim
 CANVAS_MAX_ANGLE_DEG = 55     # hand must point within this of a device
 CANVAS_DWELL = 1.3            # hold the aim this long to send (deliberate hold)
 CANVAS_GRACE_FRAMES = 6       # tolerate this many hand-less frames before hiding
+CANVAS_RAISE_FRAMES = 6       # raised-palm frames needed before the map OPENS
 CANVAS_COOLDOWN = 2.0         # min gap between canvas sends
 
 
@@ -131,6 +132,7 @@ class AirThrow:
         self._canvas_since = 0.0
         self._canvas_last_fire = 0.0
         self._canvas_miss = 0
+        self._canvas_raise = 0
         # Optional overrides (used by the hand-controlled simulation — leaving
         # them None keeps the normal send behaviour untouched).
         self._gesture_override: str | None = None
@@ -291,6 +293,7 @@ class AirThrow:
 
         now = time.time()
         if not det.hand_present or not det.open_hand:
+            self._canvas_raise = 0
             self._canvas_miss += 1
             if self._canvas_miss > CANVAS_GRACE_FRAMES and self._canvas_shown:
                 send_overlay.radar_hide()
@@ -300,6 +303,12 @@ class AirThrow:
         self._canvas_miss = 0
 
         if not self._canvas_shown:
+            # Open only on a deliberately RAISED palm (fingers up, facing the
+            # camera) held a few frames — a hand resting on the desk reads as
+            # "open" to MediaPipe but is horizontal, so it no longer triggers.
+            self._canvas_raise = self._canvas_raise + 1 if det.raised else 0
+            if self._canvas_raise < CANVAS_RAISE_FRAMES:
+                return
             self._canvas_targets = targets
             labels = [((("\U0001f512 " + p.name) if self.config.is_blocked(p.name)
                         else p.name), p.x, p.y) for p in targets]
