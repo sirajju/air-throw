@@ -377,13 +377,25 @@ class GUI:
             self._flash_status(f"Device name saved: {name}", OK)
 
     def _save_hotkey(self):
-        from .hotkey import format_hotkey_display, normalize_hotkey
+        from .hotkey import (format_hotkey_display, normalize_hotkey,
+                             validate_hotkey)
 
         val = self.v_hotkey.get().strip()
         norm = normalize_hotkey(val) if val else "<ctrl>+<alt>+a"
+        err = validate_hotkey(norm)
+        if err:
+            self._flash_status(f"Invalid shortcut: {err}", ERR)
+            return
         self.config.hotkey = norm
         self.config.save()
         self.v_hotkey.set(norm)
+        # Re-register with the new combo immediately.
+        if getattr(self, "_hk", None):
+            try:
+                self._hk.stop()
+            except Exception:
+                pass
+        self._start_hotkey()
         self._flash_status(f"Global shortcut saved: {format_hotkey_display(norm)}", OK)
 
     def _start_hotkey(self):

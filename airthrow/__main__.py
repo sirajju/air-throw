@@ -366,9 +366,12 @@ def cmd_hotkey_test(args):
 
 
 def cmd_set_hotkey(args):
-    from .hotkey import format_hotkey_display, normalize_hotkey
+    from .hotkey import format_hotkey_display, normalize_hotkey, validate_hotkey
 
     normalized = normalize_hotkey(args.hotkey)
+    err = validate_hotkey(normalized)
+    if err:
+        sys.exit(f"Invalid shortcut: {err}")
     cfg = Config.load()
     cfg.hotkey = normalized
     cfg.save()

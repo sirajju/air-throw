@@ -40,6 +40,27 @@ def normalize_hotkey(s: str) -> str:
     return "+".join(norm)
 
 
+NAMED_KEYS = ({"space", "tab", "enter", "esc", "escape", "insert", "delete",
+               "home", "end", "page_up", "page_down", "up", "down", "left",
+               "right", "backspace", "pause", "print_screen", "menu",
+               "caps_lock"} | {f"f{i}" for i in range(1, 25)})
+
+
+def validate_hotkey(normalized: str) -> str | None:
+    """Return an error message if the (normalized) hotkey is unusable, else
+    None. Catches e.g. '<ctrl>+<alt>+aa' — a two-letter key can never match,
+    so the shortcut silently never fires."""
+    mods = {"<ctrl>", "<alt>", "<shift>", "<cmd>"}
+    keys = [p for p in normalized.split("+") if p and p not in mods]
+    if len(keys) != 1:
+        return "need exactly one non-modifier key (e.g. ctrl+alt+a)"
+    k = keys[0].strip("<>")
+    if len(k) == 1 or k in NAMED_KEYS:
+        return None
+    return (f"unknown key {k!r} — use a single letter/digit or a named key "
+            f"like f5, space, insert")
+
+
 def format_hotkey_display(s: str) -> str:
     """Format pynput hotkey strings into pretty user-facing text (e.g. Ctrl+Alt+A)."""
     clean = s.replace("<ctrl>", "Ctrl").replace("<alt>", "Alt").replace("<shift>", "Shift").replace("<cmd>", "Super")
@@ -68,6 +89,16 @@ class HotkeyListener:
         self._last_fire = 0.0
         self._need_mods, self._key_vk, self._key_char, self._key_named = \
             self._parse(self.hotkey_str)
+        # Degrade gracefully on a corrupt key token (e.g. 'aa'): fall back to
+        # its first character instead of silently never matching.
+        if self._key_named and self._key_named not in NAMED_KEYS:
+            first = self._key_named[0]
+            log.warning("hotkey key %r is not valid; using %r instead "
+                        "(fix with: airthrow set-hotkey ctrl+alt+%s)",
+                        self._key_named, first, first)
+            self._key_char = first
+            self._key_vk = ord(first.upper())
+            self._key_named = None
 
     @staticmethod
     def _parse(hotkey: str):
