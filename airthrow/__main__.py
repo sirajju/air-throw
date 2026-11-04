@@ -318,6 +318,53 @@ def cmd_selftest(args):
     print(f"OK: hand model loaded and processed a frame (direction={direction}).")
 
 
+def cmd_hotkey_test(args):
+    """Live-diagnose the global shortcut: echoes raw key events and says
+    whether the configured combo fires. Press the shortcut while it runs."""
+    import time
+
+    from .hotkey import HotkeyListener, format_hotkey_display
+    cfg = Config.load()
+    fired = []
+
+    def on_fire():
+        fired.append(time.time())
+        print(">>> SHORTCUT FIRED <<<")
+
+    hk = HotkeyListener(callback=on_fire, hotkey_str=cfg.hotkey)
+    if not hk.start():
+        sys.exit("Could not start the keyboard listener (pynput missing?).")
+
+    def echo(key):
+        vk = getattr(key, "vk", None)
+        if vk is None and hasattr(key, "value"):
+            vk = getattr(key.value, "vk", None)
+        ch = getattr(key, "char", None)
+        try:
+            print(f"  key={ascii(str(key)):24} vk={vk} char={ascii(ch)} "
+                  f"mods={sorted(hk._mods)}")
+        except Exception:
+            pass
+
+    from pynput import keyboard
+    el = keyboard.Listener(on_press=echo)
+    el.daemon = True
+    el.start()
+
+    print(f"Listening for {format_hotkey_display(hk.hotkey_str)} "
+          f"for {args.seconds:.0f}s — press it now (then other keys to compare)...")
+    try:
+        time.sleep(args.seconds)
+    except KeyboardInterrupt:
+        pass
+    hk.stop(); el.stop()
+    if fired:
+        print(f"RESULT: fired {len(fired)} time(s) — the shortcut works in this process.")
+    else:
+        print("RESULT: never fired. Send me the key lines above — they show "
+              "exactly what your keyboard delivers.")
+
+
 def cmd_set_hotkey(args):
     from .hotkey import format_hotkey_display, normalize_hotkey
 
@@ -614,6 +661,11 @@ def build_parser() -> argparse.ArgumentParser:
                         help="set global shortcut key (e.g. 'ctrl+alt+a' or '<ctrl>+<alt>+s')")
     sh.add_argument("hotkey", help="hotkey string, e.g. 'ctrl+alt+a'")
     sh.set_defaults(func=cmd_set_hotkey)
+
+    hkt = sub.add_parser("hotkey-test",
+                         help="diagnose the global shortcut (echoes key events)")
+    hkt.add_argument("--seconds", type=float, default=12.0)
+    hkt.set_defaults(func=cmd_hotkey_test)
 
     an = sub.add_parser("set-animation",
                         help="gradient send border on each throw (on/off)")

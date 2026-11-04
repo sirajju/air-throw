@@ -89,6 +89,7 @@ class GUI:
 
         self._build_ui()
         self._ensure_receiver()
+        self._start_hotkey()
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
         self._poll_status()
         self._poll_preview()
@@ -384,6 +385,22 @@ class GUI:
         self.config.save()
         self.v_hotkey.set(norm)
         self._flash_status(f"Global shortcut saved: {format_hotkey_display(norm)}", OK)
+
+    def _start_hotkey(self):
+        """Register the global shortcut while the GUI is open (previously it
+        only ran in the daemon/tray, so `airthrow gui` never reacted)."""
+        self._hk = None
+        if not self.config.hotkey_enabled:
+            return
+        try:
+            from .hotkey import HotkeyListener
+            # Fired from the listener thread -> hop onto the Tk thread.
+            self._hk = HotkeyListener(
+                callback=lambda: self.root.after(0, self._trigger_send_now),
+                hotkey_str=self.config.hotkey)
+            self._hk.start()
+        except Exception as exc:
+            log.warning("GUI hotkey unavailable: %s", exc)
 
     def _trigger_send_now(self):
         if self.app:
@@ -752,6 +769,11 @@ class GUI:
         return MUTED
 
     def _on_close(self):
+        if getattr(self, "_hk", None):
+            try:
+                self._hk.stop()
+            except Exception:
+                pass
         if self.running:
             self._stop()
         self.root.destroy()
