@@ -56,7 +56,7 @@ CANVAS_AIM_MIN_MAG = 0.12     # how far the hand must be off-centre to aim
 CANVAS_MAX_ANGLE_DEG = 55     # hand must point within this of a device
 CANVAS_DWELL = 1.3            # hold the aim this long to send (deliberate hold)
 CANVAS_GRACE_FRAMES = 6       # tolerate this many hand-less frames before hiding
-CANVAS_RAISE_FRAMES = 6       # raised-palm frames needed before the map OPENS
+CANVAS_RAISE_FRAMES = 4       # raised-palm frames needed before the map OPENS
 CANVAS_COOLDOWN = 2.0         # min gap between canvas sends
 
 
@@ -174,6 +174,7 @@ class AirThrow:
     def on_received(self, sender: str, filename: str, path: Path,
                     direction: str = ""):
         self.set_status(f"Received {filename} from {sender}", (0, 220, 0), 6)
+        send_overlay.toast("Received", f"{filename} ← {sender}")
         if self.config.show_send_animation:
             try:
                 # The sender threw toward `direction`; it flies across the air
@@ -355,6 +356,7 @@ class AirThrow:
             if self.config.is_blocked(target.name):
                 log.info("canvas blocked -> %s (strict list)", target.name)
                 self.set_status(f"Blocked (strict): {target.name}", (0, 0, 255), 4)
+                send_overlay.toast("Blocked (strict)", target.name)
                 return
             payload, src = resolve_payload(self.last_image)
             if self._canvas_dry_run:
@@ -363,6 +365,9 @@ class AirThrow:
                 log.info("canvas SIM -> would send %s to %s", what, target.name)
                 self.set_status(f"Would send {what} → {target.name} (simulation)",
                                 (0, 220, 0), 5)
+                send_overlay.toast("Simulation — nothing sent",
+                                   f"{what} → {target.name}")
+                self._end_send_session_if_active()
                 return
             if self._canvas_send_fn is not None:
                 # Custom transport (e.g. IP Messenger).
@@ -373,6 +378,8 @@ class AirThrow:
                     self._canvas_send_fn(target, payload)
                     self.set_status(f"Sent {payload.name} ({src}) → "
                                     f"{target.name}", (0, 220, 0), 5)
+                    send_overlay.toast("Sent ✓",
+                                       f"{payload.name} → {target.name}")
                 except Exception as exc:
                     log.error("canvas send_fn failed: %s", exc)
                     self.set_status(f"Send failed -> {target.name}: {exc}",
@@ -383,6 +390,7 @@ class AirThrow:
                      payload.name if payload else "(none)", src, target.name)
             self._throw_to_peer(target, payload, self.last_image_rect,
                                 ">>", direction=direction)
+            self._end_send_session_if_active()
 
     def _do_throw(self, direction: str, image: Path | None,
                   rect: tuple[int, int, int, int] | None = None):
@@ -445,10 +453,12 @@ class AirThrow:
                                         self.config.device_name, direction=direction)
             log.info("SENT %s -> %s (%s)", image.name, peer.name, result)
             self.set_status(f"Sent {image.name} -> {peer.name}", (0, 220, 0), 6)
+            send_overlay.toast("Sent ✓", f"{image.name} → {peer.name}")
         except Exception as exc:  # network/file errors shown, not fatal
             self._recent_sends.pop(key, None)  # failed: allow immediate retry
             log.error("send failed %s -> %s: %s", image.name, peer.name, exc)
             self.set_status(f"Failed -> {peer.name}: {exc}", (0, 0, 255), 8)
+            send_overlay.toast("Send failed", f"{peer.name}: {exc}", 5.0)
 
     # ---- detector ----------------------------------------------------
     def _build_detector(self):
@@ -515,6 +525,12 @@ class AirThrow:
             self._receive_until_stop()
 
     # ---- on-demand send session (global shortcut / 'airthrow send') --
+    def _end_send_session_if_active(self):
+        """A canvas send completed during a hotkey session: close the session
+        (camera off) instead of waiting for the timeout."""
+        if getattr(self, "send_session_active", False):
+            self.send_session_stop.set()
+
     def trigger_send_session(self, timeout: float = 15.0, want_preview: bool = False):
         """Toggle an on-demand gesture send session (for global hotkey).
 

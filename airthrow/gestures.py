@@ -86,8 +86,10 @@ def is_fist(lm) -> bool:
     return extended_finger_count(lm) <= 1
 
 
-RAISED_MIN_SIZE = 0.09   # wrist->knuckle span; smaller = far away / edge-on
-RAISED_UPRIGHT = 1.0     # fingertip must be this many hand-sizes ABOVE the wrist
+RAISED_MIN_SIZE = 0.07   # wrist->knuckle span; smaller = far away / edge-on
+RAISED_UPRIGHT = 0.5     # fingertip this many hand-sizes ABOVE the wrist
+                         # (0.5 accepts a palm tilted toward the camera; a desk
+                         #  hand is ~0 so it still cannot trigger)
 
 
 def is_raised_palm(lm) -> bool:

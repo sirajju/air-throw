@@ -573,6 +573,47 @@ class _Banner:
             pass
 
 
+class _Toast:
+    """A small top-right notification card (sent / received / blocked)."""
+
+    def __init__(self, manager, root, title, text, duration=3.5):
+        self._mgr = manager
+        self._root = root
+        import tkinter as tk
+        sw = root.winfo_screenwidth()
+        w, h = 340, (74 if text else 50)
+        win = tk.Toplevel(root)
+        win.overrideredirect(True)
+        win.attributes("-topmost", True)
+        try:
+            win.attributes("-alpha", 0.97)
+        except tk.TclError:
+            pass
+        win.geometry(f"{w}x{h}+{sw - w - 24}+{24}")
+        win.configure(bg="#1b1d23")
+        bar = tk.Frame(win, bg="#00e5c8", width=5)
+        bar.pack(side="left", fill="y")
+        body = tk.Frame(win, bg="#1b1d23")
+        body.pack(side="left", fill="both", expand=True, padx=12, pady=8)
+        tk.Label(body, text=title, bg="#1b1d23", fg="#ffffff", anchor="w",
+                 font=("Segoe UI Semibold", 11)).pack(fill="x")
+        if text:
+            tk.Label(body, text=text, bg="#1b1d23", fg="#9aa0ad", anchor="w",
+                     font=("Segoe UI", 10), wraplength=300,
+                     justify="left").pack(fill="x")
+        _make_click_through(win)
+        self._win = win
+        root.after(int(duration * 1000), self.destroy)
+
+    def destroy(self):
+        try:
+            self._win.destroy()
+        except Exception:
+            pass
+        if self._mgr._toast is self:
+            self._mgr._toast = None
+
+
 class _Manager:
     """Owns the single Tk root + overlay thread; dispatches flash requests."""
 
@@ -585,6 +626,7 @@ class _Manager:
         self._active: set[_Flash] = set()
         self._flies: set = set()
         self._selector: _Selector | None = None
+        self._toast: _Toast | None = None
         self._radar: _Radar | None = None
         self._banner: _Banner | None = None
 
@@ -602,6 +644,12 @@ class _Manager:
         if not self._ensure_thread():
             return
         self._q.put(("fly", mode, direction, str(path) if path else ""))
+
+    def toast(self, title: str, text: str = "", duration: float = 3.5) -> None:
+        """Show a small top-right notification card. Thread-safe."""
+        if not self._ensure_thread():
+            return
+        self._q.put(("toast", title, text, duration))
 
     def selector_show(self, names, title: str = "Throw to…",
                       style: str | None = None) -> None:
@@ -704,6 +752,11 @@ class _Manager:
         elif kind == "sel_set":
             if self._selector:
                 self._selector.set_index(cmd[1])
+        elif kind == "toast":
+            _, title, text, duration = cmd
+            if self._toast:
+                self._toast.destroy()
+            self._toast = _Toast(self, self._root, title, text, duration)
         elif kind == "sel_hide":
             if self._selector:
                 self._selector.destroy()
@@ -758,6 +811,11 @@ def fly_out(path, direction: str) -> None:
 def fly_in(path, from_direction: str) -> None:
     """Receiver: fly the image in from `from_direction` ('left'/'right')."""
     _manager.fly("in", from_direction, path)
+
+
+def toast(title: str, text: str = "", duration: float = 3.5) -> None:
+    """Small top-right notification card (sent / received / blocked)."""
+    _manager.toast(title, text, duration)
 
 
 def selector_show(names, title: str = "Throw to…",
