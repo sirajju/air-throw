@@ -70,8 +70,14 @@ def _build_gradient(stops):
 
 
 def _gradient_slice(Image, ImageTk, grad, orient, length, offset,
-                    thickness=THICKNESS):
-    """A PhotoImage of a `thickness`-wide slice of the scrolling gradient."""
+                    thickness=THICKNESS, master=None):
+    """A PhotoImage of a `thickness`-wide slice of the scrolling gradient.
+
+    `master` MUST be a widget of the overlay's own Tk root: without it the
+    PhotoImage binds to the process's FIRST Tk interpreter (the GUI window when
+    one is open), and configuring an overlay label with it fails with
+    'image "pyimageN" doesn't exist' — overlays silently never showed in GUI
+    mode."""
     import numpy as np
 
     idx = (np.arange(length) + offset) % PERIOD
@@ -80,7 +86,8 @@ def _gradient_slice(Image, ImageTk, grad, orient, length, offset,
         arr = np.broadcast_to(line[None, :, :], (thickness, length, 3))
     else:
         arr = np.broadcast_to(line[:, None, :], (length, thickness, 3))
-    return ImageTk.PhotoImage(Image.fromarray(np.ascontiguousarray(arr), "RGB"))
+    return ImageTk.PhotoImage(Image.fromarray(np.ascontiguousarray(arr), "RGB"),
+                              master=master)
 
 
 def _border_specs(x, y, w, h, t):
@@ -137,7 +144,7 @@ class _Flash:
 
     def _slice_image(self, orient, length, offset):
         return _gradient_slice(self._Image, self._ImageTk, self._grad,
-                               orient, length, offset)
+                               orient, length, offset, master=self._root)
 
     def _tick(self):
         now = time.time()
@@ -278,7 +285,7 @@ class _Fly:
         w = max(1, int(self._bw * scale))
         h = max(1, int(self._bh * scale))
         img = self._base.resize((w, h))
-        photo = self._ImageTk.PhotoImage(img)
+        photo = self._ImageTk.PhotoImage(img, master=self._root)
         self._lbl.configure(image=photo)
         self._lbl.image = photo
         self._win.geometry(f"{w}x{h}+{int(cx - w / 2)}+{int(cy - h / 2)}")
@@ -383,7 +390,7 @@ class _Selector:
         offset = int(time.time() * SCROLL_PX_PER_S) % PERIOD
         for win, lbl, orient, length in self._strips:
             photo = _gradient_slice(self._Image, self._ImageTk, self._grad,
-                                    orient, length, offset)
+                                    orient, length, offset, master=self._root)
             lbl.configure(image=photo)
             lbl.image = photo
         self._root.after(FRAME_MS, self._animate)
