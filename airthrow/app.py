@@ -18,12 +18,14 @@ import subprocess
 import sys
 import threading
 import time
+from dataclasses import dataclass
 from pathlib import Path
 
 from . import send_overlay, transfer
 from .config import Config, local_ip
 from .foreground_image import current_image, foreground_rect, foreground_window
 from .logs import LOG_PATH, get_logger
+from .payload import resolve_payload
 
 log = get_logger()
 
@@ -52,9 +54,9 @@ PICKER_CONFIRM_DELAY = 1.8  # seconds of no swipe before the picker auto-sends
 # Canvas (map) gesture tuning.
 CANVAS_AIM_MIN_MAG = 0.12     # how far the hand must be off-centre to aim
 CANVAS_MAX_ANGLE_DEG = 55     # hand must point within this of a device
-CANVAS_DWELL = 0.6            # hold the aim this long to send
+CANVAS_DWELL = 1.3            # hold the aim this long to send (deliberate hold)
 CANVAS_GRACE_FRAMES = 6       # tolerate this many hand-less frames before hiding
-CANVAS_COOLDOWN = 1.5         # min gap between canvas sends
+CANVAS_COOLDOWN = 2.0         # min gap between canvas sends
 
 
 def _angle_diff(a: float, b: float) -> float:
@@ -129,6 +131,12 @@ class AirThrow:
         self._canvas_since = 0.0
         self._canvas_last_fire = 0.0
         self._canvas_miss = 0
+        # Optional overrides (used by the hand-controlled simulation — leaving
+        # them None keeps the normal send behaviour untouched).
+        self._gesture_override: str | None = None
+        self._canvas_targets_override: list | None = None
+        self._canvas_dry_run = False
+        self._canvas_send_fn = None  # called (target, image) for real sends
         self.status = "Ready"
         self.status_color = (255, 255, 255)
         self.status_until = 0.0
@@ -194,12 +202,21 @@ class AirThrow:
         self.set_status("Released (cancelled)", (180, 180, 180), 3)
 
     def on_throw(self, direction: str):
-        """A gesture fired in `direction`. Use the held image (grab) or the
-        current foreground image (swipe)."""
-        image = self._held_image or self.last_image
+        """A gesture fired in `direction`. Payload: the held image (grab mode)
+        or the clipboard-first resolution chain (copied files -> Explorer
+        selection -> open image -> copied screenshot -> last image)."""
+        if self._held_image:
+            image, src = self._held_image, "picked image"
+        else:
+            image, src = resolve_payload(self.last_image)
         rect = self._held_rect or self.last_image_rect
         self._held_image = None
         self._held_rect = None
+        if image:
+            log.info("payload: %s (%s)", image.name, src)
+            self.set_status(f"Sending {src}: {image.name}", (0, 220, 255), 5)
+        else:
+            self.set_status(src.capitalize(), (0, 180, 255), 5)
         if self.config.use_picker():
             self._picker_swipe(direction, image, rect)
         else:
@@ -265,7 +282,7 @@ class AirThrow:
         your hand points toward (angle from screen centre), and send after a
         short hold. The map is debounced — a brief hand loss won't close it."""
         det = self.detector
-        targets = self.config.positioned_targets()
+        targets = self._canvas_targets_override or self.config.positioned_targets()
         if not targets:
             if det and det.hand_present:
                 self.set_status("Canvas: place devices on the map (GUI canvas)",
@@ -284,8 +301,9 @@ class AirThrow:
 
         if not self._canvas_shown:
             self._canvas_targets = targets
-            send_overlay.radar_show([(p.name, p.x, p.y) for p in targets],
-                                    "Reach toward a device")
+            labels = [((("\U0001f512 " + p.name) if self.config.is_blocked(p.name)
+                        else p.name), p.x, p.y) for p in targets]
+            send_overlay.radar_show(labels, "Reach toward a device")
             self._canvas_shown = True
             self._canvas_aim = -1
 
@@ -303,6 +321,8 @@ class AirThrow:
         hand_ang = math.atan2(dy, dx)
         best, best_diff = -1, math.pi
         for i, p in enumerate(self._canvas_targets):
+            if self.config.is_blocked(p.name):
+                continue  # strict list: can't even aim at a blocked peer
             t_ang = math.atan2(p.y - 0.5, p.x - 0.5)
             diff = abs(_angle_diff(hand_ang, t_ang))
             if diff < best_diff:
@@ -323,9 +343,36 @@ class AirThrow:
             self._canvas_aim = -1
             self._canvas_shown = False
             send_overlay.radar_hide()
+            if self.config.is_blocked(target.name):
+                log.info("canvas blocked -> %s (strict list)", target.name)
+                self.set_status(f"Blocked (strict): {target.name}", (0, 0, 255), 4)
+                return
+            payload, src = resolve_payload(self.last_image)
+            if self._canvas_dry_run:
+                # Simulation: show what WOULD be sent, but don't send.
+                what = f"{payload.name} ({src})" if payload else src
+                log.info("canvas SIM -> would send %s to %s", what, target.name)
+                self.set_status(f"Would send {what} → {target.name} (simulation)",
+                                (0, 220, 0), 5)
+                return
+            if self._canvas_send_fn is not None:
+                # Custom transport (e.g. IP Messenger).
+                if not payload:
+                    self.set_status(src.capitalize(), (0, 180, 255), 5)
+                    return
+                try:
+                    self._canvas_send_fn(target, payload)
+                    self.set_status(f"Sent {payload.name} ({src}) → "
+                                    f"{target.name}", (0, 220, 0), 5)
+                except Exception as exc:
+                    log.error("canvas send_fn failed: %s", exc)
+                    self.set_status(f"Send failed -> {target.name}: {exc}",
+                                    (0, 0, 255), 6)
+                return
             direction = "left" if target.x < 0.5 else "right"
-            log.info("canvas send -> %s", target.name)
-            self._throw_to_peer(target, self.last_image, self.last_image_rect,
+            log.info("canvas send %s (%s) -> %s",
+                     payload.name if payload else "(none)", src, target.name)
+            self._throw_to_peer(target, payload, self.last_image_rect,
                                 ">>", direction=direction)
 
     def _do_throw(self, direction: str, image: Path | None,
@@ -340,6 +387,10 @@ class AirThrow:
 
     def _throw_to_peer(self, peer, image: Path | None, rect, arrow: str = ">>",
                        direction: str = "right"):
+        if self.config.is_blocked(getattr(peer, "name", "")):
+            log.info("blocked send to %s (strict list)", peer.name)
+            self.set_status(f"Blocked (strict): {peer.name}", (0, 0, 255), 5)
+            return
         if not image:
             log.warning("throw to %s but no image to send", peer.name)
             self.set_status(f"{arrow} No image open to throw", (0, 180, 255))
@@ -395,7 +446,7 @@ class AirThrow:
         from .gestures import (CanvasDetector, GrabDetector,
                                PalmReachDetector, SwipeDetector, TwoFingerDetector)
         dist = self.config.swipe_min_distance
-        mode = self.config.gesture_mode
+        mode = self._gesture_override or self.config.gesture_mode
         if mode == "grab":
             return GrabDetector(on_throw=self.on_throw, on_pick=self.on_pick,
                                 on_cancel=self.on_cancel, min_distance=dist)
@@ -419,6 +470,20 @@ class AirThrow:
             self._camera_phase()
         else:
             self._receive_until_stop()
+
+    def run_canvas_sim(self, targets, dry_run: bool = True, send_fn=None):
+        """Hand-controlled canvas: reach toward a device on the map, hold to
+        select. `dry_run` True = nothing is sent (simulation); otherwise
+        `send_fn(target, image)` performs the real send. Preview on, q/ESC
+        quits. Does not touch saved config or the normal send path."""
+        self._gesture_override = "canvas"
+        self._canvas_targets_override = list(targets)
+        self._canvas_dry_run = dry_run
+        self._canvas_send_fn = send_fn
+        self._stop = threading.Event()
+        self._preview_fn = lambda: True
+        self._quit_on_key = True
+        self._camera_phase()
 
     def start_background(self, stop_event: threading.Event,
                          preview_fn, on_preview_key, frame_sink=None,
@@ -615,6 +680,8 @@ class AirThrow:
 
     def _serve(self):
         transfer.on_received = self.on_received
+        transfer.on_receiving = lambda sender, name: self.set_status(
+            f"Receiving {name} from {sender}…", (0, 200, 255), 30)
         transfer.start_receiver(self.config)
         log.info("receiving on %s:%d as '%s'",
                  local_ip(), self.config.listen_port, self.config.device_name)
@@ -700,7 +767,7 @@ class AirThrow:
 
             self.camera_ok = True
             frame, _ = self.detector.process(frame)
-            if self.config.gesture_mode == "canvas":
+            if (self._gesture_override or self.config.gesture_mode) == "canvas":
                 self._canvas_tick()
 
             want_preview = self._preview_fn()
@@ -900,6 +967,23 @@ def open_with_default_app(path: Path) -> None:
 
 def run(camera_index: int = 0, debug: bool = False, enable_camera: bool = True):
     AirThrow(Config.load(), camera_index=camera_index, debug=debug).run(enable_camera=enable_camera)
+
+
+@dataclass
+class SimPeer:
+    """A lightweight map target (name + canvas position + ip) for the canvas."""
+    name: str
+    x: float
+    y: float
+    ip: str = ""
+
+
+def run_canvas_sim(targets, camera_index: int = 0, debug: bool = True,
+                   dry_run: bool = True, send_fn=None):
+    """Entry point: hand-controlled canvas over `targets` (iterable of SimPeer).
+    dry_run True = simulation (no send); else send_fn(target, image) sends."""
+    AirThrow(Config.load(), camera_index=camera_index, debug=debug).run_canvas_sim(
+        targets, dry_run=dry_run, send_fn=send_fn)
 
 
 def run_daemon(camera_index: int = 0, with_camera: bool = False):

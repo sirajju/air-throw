@@ -52,6 +52,163 @@ def cmd_daemon(args):
     run_daemon(camera_index=args.camera, with_camera=getattr(args, "with_camera", False))
 
 
+def _ipmsg_client():
+    from .ipmsg import IpmsgClient
+    cfg = Config.load()
+    c = IpmsgClient(user_name=cfg.device_name,
+                    on_message=lambda p, t: print(f"\n[msg] {p.label} ({p.ip}): {t}"),
+                    on_peer=lambda p: None)
+    c.start()
+    return c
+
+
+def cmd_ipmsg_scan(args):
+    """Auto-discover IP Messenger peers on the LAN (no manual IPs)."""
+    import time
+    c = _ipmsg_client()
+    if not c.bound:
+        c.close()
+        sys.exit("Port 2425 is in use by IP Messenger on THIS machine. Close it "
+                 "first — discovery needs that port (AirThrow replaces ipmsg here).")
+    print(f"Discovering IP Messenger peers for {args.seconds}s "
+          f"(everyone running ipmsg answers)...")
+    try:
+        time.sleep(args.seconds)
+    except KeyboardInterrupt:
+        pass
+    peers = c.list_peers()
+    c.close()
+    if not peers:
+        print("No peers found. Are others running IP Messenger on this LAN?")
+        return
+    print(f"\nFound {len(peers)} peer(s):")
+    for p in peers:
+        print(f"  {p.ip:16} {p.label}")
+
+
+def cmd_ipmsg_msg(args):
+    import time
+    c = _ipmsg_client()
+    time.sleep(0.4)  # let the socket settle
+    c.send_message(args.ip, args.text)
+    mode = "" if c.bound else " (send-only; no delivery confirmation)"
+    print(f"Message sent to {args.ip}{mode}.")
+    time.sleep(0.6)  # allow the ack to arrive
+    c.close()
+
+
+def cmd_ipmsg_canvas(args):
+    """Discover ipmsg peers, lay them on the canvas, pick with your HAND.
+    Dry-run unless simulation is OFF (set-simulation off) — then it sends the
+    foreground image to the pointed-at peer over IP Messenger."""
+    import math
+    import time
+
+    from .app import SimPeer, run_canvas_sim
+    cfg = Config.load()
+    dry = cfg.simulation_mode
+    c = _ipmsg_client()
+    if not c.bound:
+        c.close()
+        sys.exit("Port 2425 is held by IP Messenger here — close it so discovery "
+                 "can run, then retry.")
+    print(f"Discovering IP Messenger peers for {args.seconds}s...")
+    time.sleep(args.seconds)
+    peers = c.list_peers()
+    # Keep the ipmsg client ALIVE during the camera loop so it can serve files
+    # (it owns 2425; the camera doesn't need that port).
+
+    if peers:
+        items = [(p.label, p.ip) for p in peers]
+    else:
+        print("No peers found — showing a sample layout instead.")
+        items = [(n, "") for n in
+                 ("Reception-PC", "Salah", "Nabeel", "Accounts", "Meeting-Room")]
+
+    n = len(items)
+    targets = []
+    for i, (name, ip) in enumerate(items):
+        ang = -math.pi / 2 + i * (2 * math.pi / max(1, n))
+        radius = 0.30 + 0.06 * (i % 2)
+        targets.append(SimPeer(name, round(0.5 + radius * math.cos(ang), 3),
+                               round(0.5 + radius * math.sin(ang), 3), ip=ip))
+
+    def send_fn(target, image):
+        if not target.ip:
+            print(f"(no IP for {target.name} — sample peer, nothing sent)")
+            return
+        if not image:
+            print("No foreground image detected to send.")
+            return
+        c.send_file(target.ip, image, "AirThrow")
+        print(f"Sent {image.name} -> {target.name} ({target.ip}) via IP Messenger")
+
+    mode = "SIMULATION (no send)" if dry else "LIVE — will SEND over IP Messenger"
+    print(f"Placed {n} peer(s). Mode: {mode}. Reach your open hand toward one and "
+          "HOLD to select. Blocked (strict) peers can't be selected. q/Esc quits.")
+    try:
+        run_canvas_sim(targets, camera_index=args.camera, dry_run=dry,
+                       send_fn=send_fn)
+    finally:
+        c.close()
+    print("Canvas ended.")
+
+
+def cmd_set_simulation(args):
+    cfg = Config.load()
+    cfg.simulation_mode = args.state == "on"
+    cfg.save()
+    if cfg.simulation_mode:
+        print("Simulation ON — canvas selections are dry-run (nothing is sent).")
+    else:
+        print("Simulation OFF — canvas selections will really send. Strict-list "
+              "peers are still blocked.")
+
+
+def cmd_strict(args):
+    cfg = Config.load()
+    if args.action == "list":
+        if cfg.blocked_names:
+            print("Strict block list (never sent to):")
+            for b in cfg.blocked_names:
+                print(f"  - {b}")
+        else:
+            print("Strict block list is empty.")
+    elif args.action == "add":
+        if not args.name:
+            sys.exit("Usage: airthrow strict add <name>")
+        cfg.block(args.name)
+        print(f"Blocked '{args.name}'. It will never receive a throw.")
+    else:  # remove
+        if not args.name:
+            sys.exit("Usage: airthrow strict remove <name>")
+        ok = cfg.unblock(args.name)
+        print(f"Removed '{args.name}'." if ok else f"'{args.name}' was not listed.")
+
+
+def cmd_ipmsg_send(args):
+    import time
+    from pathlib import Path
+    path = Path(args.file)
+    if not path.exists():
+        sys.exit(f"No such file: {path}")
+    c = _ipmsg_client()
+    if not c.bound:
+        c.close()
+        sys.exit("Port 2425 is in use by IP Messenger on THIS machine. File "
+                 "sending needs that port — close IP Messenger here and retry.")
+    time.sleep(0.4)
+    c.send_file(args.ip, path, args.text or "")
+    print(f"Offered {path.name} to {args.ip}. Keeping the transfer server up...")
+    print("Leave this running until the peer has accepted the file. Ctrl+C to stop.")
+    try:
+        while True:
+            time.sleep(1)
+    except KeyboardInterrupt:
+        pass
+    c.close()
+
+
 def cmd_service(args):
     from . import autostart
     if args.action == "install":
@@ -382,6 +539,40 @@ def build_parser() -> argparse.ArgumentParser:
                         help="install/remove the background service (auto-start on login)")
     sv.add_argument("action", choices=("install", "uninstall", "status"))
     sv.set_defaults(func=cmd_service)
+
+    # IP Messenger interop (auto-discovery + messages + files).
+    isc = sub.add_parser("ipmsg-scan",
+                         help="auto-discover IP Messenger peers on the LAN")
+    isc.add_argument("--seconds", type=float, default=3.0, help="listen time")
+    isc.set_defaults(func=cmd_ipmsg_scan)
+
+    imsg = sub.add_parser("ipmsg-msg", help="send a text message to an ipmsg peer")
+    imsg.add_argument("ip")
+    imsg.add_argument("text")
+    imsg.set_defaults(func=cmd_ipmsg_msg)
+
+    ican = sub.add_parser("ipmsg-canvas",
+                          help="discover ipmsg peers; pick one with your hand on the canvas")
+    ican.add_argument("--seconds", type=float, default=4.0, help="discovery time")
+    ican.add_argument("--camera", type=int, default=0, help="camera index (default 0)")
+    ican.set_defaults(func=cmd_ipmsg_canvas)
+
+    ssm = sub.add_parser("set-simulation",
+                         help="canvas dry-run on/off (off = really send)")
+    ssm.add_argument("state", choices=("on", "off"))
+    ssm.set_defaults(func=cmd_set_simulation)
+
+    st = sub.add_parser("strict",
+                        help="strict block list — never send to these (e.g. managers)")
+    st.add_argument("action", choices=("list", "add", "remove"))
+    st.add_argument("name", nargs="?", default="")
+    st.set_defaults(func=cmd_strict)
+
+    isend = sub.add_parser("ipmsg-send", help="send any file to an ipmsg peer")
+    isend.add_argument("ip")
+    isend.add_argument("file")
+    isend.add_argument("text", nargs="?", default="", help="optional message")
+    isend.set_defaults(func=cmd_ipmsg_send)
 
     sg = sub.add_parser("set-gesture", help="choose gesture: two, grab or swipe")
     sg.add_argument("mode", choices=("swipe", "palm", "two", "grab", "canvas"))
